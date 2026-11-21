@@ -4,9 +4,10 @@ Zuerst nutzt ihn die Recherche an „Produkt melden“ der Materialablage (mater
 Artikelentwurf der Strömipedia. Ein Modul bringt seine Anweisung, seine Werkzeuge und seine Prüfungen selbst mit; hier
 steht, was für alle gleich ist:
 
-  - Client-Fabrik CLIENT (Tests setzen eine Attrappe ein) und verfuegbar(): Die Funktion gibt es nur mit
-    ANTHROPIC_API_KEY in der Umgebung (.env). Der Schlüssel wird nur aus os.environ gelesen – nie aus Leitstelle →
-    Einstellungen, nie in Seiten, Logs oder Fehlertexten; das Protokoll des SDK bleibt stumm (Stufe WARNING).
+  - Client-Fabrik CLIENT (Tests setzen eine Attrappe ein) und verfuegbar(): Die Funktion gibt es nur mit einem
+    Schlüssel (schluessel()): unter Leitstelle → Einstellungen gespeichert (geheim wie das Mailkennwort, Vorrang wie
+    jede Einstellung; Wunsch des Nutzers vom 21.11.2026) oder ANTHROPIC_API_KEY in der Umgebung (.env). Nie in Seiten,
+    Logs oder Fehlertexten; das Protokoll des SDK bleibt stumm (Stufe WARNING).
     `anthropic` wird erst in der Fabrik bzw. in der Fehlerabbildung importiert – ohne Schlüssel braucht es niemand.
   - Modell, Preise und kosten_cent(): eine Schätzung aus dem gemeldeten Verbrauch (usage) aller Aufrufe eines Laufs.
   - Ein Lauf im Hintergrund (Tabelle ki_laeufe, app/db.py): starten() legt die Zeile unter BEGIN IMMEDIATE an – mit
@@ -104,30 +105,47 @@ class LaufFehler(Exception):
 
 # --- Schlüssel und Client -----------------------------------------------------------------------------------------
 
+def _aus_umgebung():
+    return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+
+
+def schluessel():
+    """Der geltende Schlüssel: unter Leitstelle → Einstellungen gespeichert (Vorrang wie bei jeder Einstellung; mit
+    EINSTELLUNGEN_AUS nur die .env), sonst ANTHROPIC_API_KEY aus der Umgebung. Je Aufruf aus der Datenbank – so sehen
+    alle Arbeitsprozesse und der Thread eines Laufs denselben Stand. Leer: nicht eingerichtet."""
+    from . import einstellungen
+    return einstellungen.gespeicherter_wert("ANTHROPIC_API_KEY").strip() or _aus_umgebung()
+
+
 def verfuegbar():
-    """Gibt es die Funktion? Nur mit ANTHROPIC_API_KEY in der Umgebung – nicht über Leitstelle → Einstellungen."""
-    return bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
+    """Gibt es die Funktion? Nur mit einem Schlüssel (Leitstelle → Einstellungen oder .env)."""
+    return bool(schluessel())
 
 
 def _client():
-    """Der API-Client: Schlüssel ausdrücklich aus der Umgebung (so sucht das SDK keine anderen Zugangsdaten auf der
-    Platte), zwei Wiederholungen des SDK bei 429/5xx (H2 A), Verbindungsaufbau höchstens 10 s. Das Protokoll des SDK
-    und seines HTTP-Clients bleibt auf WARNING, auch wenn jemand ANTHROPIC_LOG setzt."""
+    """Der API-Client: Schlüssel ausdrücklich übergeben (so sucht das SDK keine anderen Zugangsdaten in Umgebung und
+    auf der Platte), zwei Wiederholungen des SDK bei 429/5xx (H2 A), Verbindungsaufbau höchstens 10 s. Das Protokoll
+    des SDK und seines HTTP-Clients bleibt auf WARNING, auch wenn jemand ANTHROPIC_LOG setzt."""
+    k = schluessel()
+    if not k:                                 # inzwischen unter Leitstelle → Einstellungen zurückgesetzt
+        raise LaufFehler("Die Recherche per Claude API ist nicht mehr eingerichtet (kein API-Schlüssel).")
     import anthropic
     for name in ("anthropic", "httpx2", "httpcore2"):
         logging.getLogger(name).setLevel(logging.WARNING)
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip(), max_retries=2,
-                               timeout=anthropic.Timeout(600.0, connect=10.0))
+    return anthropic.Anthropic(api_key=k, max_retries=2, timeout=anthropic.Timeout(600.0, connect=10.0))
 
 
 CLIENT = _client
 
 
 def _schluessel_weg(text):
-    """Falls je ein Text den Schlüssel enthielte (Fehlermeldung eines Proxys): unkenntlich machen."""
-    k = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    """Falls je ein Text einen Schlüssel enthielte (Fehlermeldung eines Proxys): unkenntlich machen – den geltenden und
+    den aus der .env (ein gespeicherter kann ihn verdecken)."""
     text = str(text or "")
-    return text.replace(k, "***") if k else text
+    for k in {schluessel(), _aus_umgebung()}:
+        if k:
+            text = text.replace(k, "***")
+    return text
 
 
 def fehlertext(exc, lauf_id=None):

@@ -727,7 +727,7 @@
       eingabe = `<input type="${typ}" id="${id}" data-k="${f.schluessel}" autocomplete="off"${bereich}`
         + ` value="${S.esc(f.wert)}" placeholder="${S.esc(f.platzhalter)}">`;
     }
-    const hilfe = f.geheim && f.gesetzt ? (f.hilfe + " Zurzeit ist eines hinterlegt.") : f.hilfe;
+    const hilfe = f.geheim && f.gesetzt ? (f.hilfe + " Zurzeit ist ein Wert hinterlegt.") : f.hilfe;
     return `<div class="einst-feld">
       <div class="einst-kopf">${f.art === "schalter" ? "" : `<label for="${id}">${S.esc(f.titel)}</label>`}
         ${marke}${zurueck}</div>

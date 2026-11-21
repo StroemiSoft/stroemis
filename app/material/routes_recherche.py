@@ -1,6 +1,6 @@
 """Routen der Recherche per Claude API an einer Produktmeldung (services/recherche.py, app/ki.py; 21.11.2026).
 
-Alles nur für die Material-Verwaltung (B1 A, B2 A – katalog_required). Ohne ANTHROPIC_API_KEY antworten nur Start und
+Alles nur für die Material-Verwaltung (B1 A, B2 A – katalog_required). Ohne Schlüssel (ki.schluessel) antworten nur Start und
 Abbrechen mit 503 – was schon da ist (Stand, Vorschlag, Dateien, Übernahme, Nachladen), braucht keinen Aufruf der API
 und bleibt erreichbar (Browserprüfung vom 21.11.2026, V2); GET /meldungen trägt dann „recherche“, aber kein
 „recherche_moeglich“ (kein Knopf „Recherchieren lassen“). Unbekannte Meldungen: 404 wie überall. Die Dateien eines Vorschlags liefert
