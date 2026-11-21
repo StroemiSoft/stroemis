@@ -14406,3 +14406,23 @@ Ausweichen/„unklar“/abgerufen, Übernahme samt gleichzeitigem Nachladen und 
 Kontolöschung, tote Läufe, Domains); in `tests/test_ki.py` der echte SDK-Client gegen einen lokalen schweigenden
 SSE-Server (Abbrechen, Zeitgrenze, Abstand mit `ping`), Zwischenstand der Kosten, Werkzeug zweimal gescheitert,
 Nacharbeit toter Läufe; `tests/test_material_recherche.py` an den Leseweg ohne Schlüssel und die Oberfläche angepasst.
+
+## Recherche per Claude API: Schlüssel auch unter Leitstelle → Einstellungen (Wunsch, 21.11.2026)
+
+- **Neu:** Feld „Schlüssel für die Claude API“ in der Gruppe Materialablage (`ANTHROPIC_API_KEY`, `app/einstellungen.py`)
+  – geheim wie das Mailkennwort: gespeichert, nie zurückgegeben, leer speichern behält ihn, „Zurücksetzen“ löscht ihn
+  (dann gilt wieder die `.env`). Vorrang vor der `.env` wie jede Einstellung, mit `EINSTELLUNGEN_AUS=1` nur die `.env`.
+  Gilt sofort in allen Arbeitsprozessen, ohne Neustart.
+- **Geprüft beim Speichern** (neuer Haken `Feld.pruefen`): ein Wort ohne Leerraum und Steuerzeichen, höchstens 400
+  Zeichen, Anfang `sk-ant-`; ein Admin-Schlüssel (`sk-ant-admin…`) wird abgelehnt.
+- **`app/ki.py`:** `schluessel()` liest je Aufruf erst den gespeicherten Wert (`einstellungen.gespeicherter_wert`, auch
+  im Thread eines Laufs aktuell), dann die Umgebung; `verfuegbar()`, der Client und das Schwärzen von Fehlertexten
+  (gespeicherter und `.env`-Schlüssel) nutzen ihn. Wird der Schlüssel zwischen Start und erstem Aufruf zurückgesetzt,
+  endet der Lauf „fehlgeschlagen“ mit „nicht mehr eingerichtet“.
+- **Leitstelle:** Der Hinweis unter geheimen Feldern heißt jetzt „Zurzeit ist ein Wert hinterlegt.“ (vorher „… eines …“,
+  passte nur zum Kennwort).
+- **Doku:** README (Einschalten, Liste „nur in der `.env`“, Variablentabelle), `.env.example`, `docker-compose.yml`
+  (dazu: nach einer Änderung der `.env` `docker compose up -d`, ein `docker restart` liest sie nicht neu).
+- **Tests:** `tests/test_ki.py` – neu `test_schluessel_leitstelle` (nie ausgeliefert, Prüfung beim Speichern, Vorrang,
+  leer behält, Zurücksetzen, Notausgang, Thread, Liste ohne Neustart, Schwärzen, echter Client); die statische Prüfung
+  erlaubt den Namen jetzt auch in `app/einstellungen.py` (geheimes Feld), weiter nie in Vorlagen und JS.

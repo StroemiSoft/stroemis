@@ -250,6 +250,89 @@ def test_schluessel_und_kosten():
     print("Schlüssel und Kosten bestanden.")
 
 
+def test_schluessel_leitstelle():
+    """Seit 21.11.2026 auch unter Leitstelle → Einstellungen: geheim wie das Mailkennwort (nie zurückgegeben, leer =
+    unverändert), Vorrang vor der .env, „Zurücksetzen“ nimmt wieder die .env, EINSTELLUNGEN_AUS nur die .env; geprüft
+    beim Speichern (kein Leerraum, kein Admin-Schlüssel, sk-ant-…); die Meldungsliste bietet die Recherche ohne
+    Neustart an; Fehlertexte ohne den gespeicherten Schlüssel; der echte Client bekommt den gespeicherten."""
+    from app import einstellungen, ki
+    gespeichert = "sk-ant-api03-leitstelle-0000-geheim"
+    with tempfile.TemporaryDirectory() as tmp:
+        app = app_mit_schluessel(tmp, schluessel=None)
+        from test_material import anmelden
+        adm = anmelden(app, "admin@example.org", "geheim123")
+
+        def felder():
+            r = adm.get("/api/admin/einstellungen")
+            assert r.status_code == 200 and gespeichert not in r.get_data(as_text=True)
+            return {f["schluessel"]: f for f in r.json["felder"]}
+        f = felder()["ANTHROPIC_API_KEY"]
+        assert f["geheim"] and f["art"] == "passwort" and f["wert"] == "" and f["gesetzt"] is False \
+            and f["quelle"] == "vorgabe" and f["gruppe"] == "Materialablage", f
+        assert "recherche_moeglich" not in adm.get("/api/material/meldungen").json
+        for falsch, wort in (("sk-ant-api03 mit leer", "Leerzeichen"), ("sk-ant-api03-a\nb", "Leerzeichen"),
+                             ("sk-ant-admin01-xyz", "Admin-Schlüssel"), ("geheim", "sk-ant-")):
+            r = adm.put("/api/admin/einstellungen", json={"werte": {"ANTHROPIC_API_KEY": falsch}})
+            assert r.status_code == 400 and wort in r.json["error"] \
+                and r.json["error"].startswith("„Schlüssel für die Claude API“"), (falsch, r.json)
+        with app.app_context():
+            assert einstellungen.gespeicherter_wert("ANTHROPIC_API_KEY") == ""
+        r = adm.put("/api/admin/einstellungen", json={"werte": {"ANTHROPIC_API_KEY": f"  {gespeichert}  "}})
+        assert r.status_code == 200 and gespeichert not in r.get_data(as_text=True), r.json
+        f = felder()["ANTHROPIC_API_KEY"]
+        assert f["wert"] == "" and f["gesetzt"] is True and f["quelle"] == "gespeichert", f
+        # Ohne Neustart: die Liste bietet die Recherche an (Material-Verwaltung = Administrator).
+        assert adm.get("/api/material/meldungen").json["recherche_moeglich"]["eingerichtet"] is True
+        # Leer speichern behält ihn (wie beim Mailkennwort).
+        assert adm.put("/api/admin/einstellungen", json={"werte": {"ANTHROPIC_API_KEY": ""}}).status_code == 200
+        ctx = im_kontext(app)
+        try:
+            assert ki.schluessel() == gespeichert and ki.verfuegbar()
+            # Vorrang vor der .env; Fehlertexte ohne beide.
+            os.environ["ANTHROPIC_API_KEY"] = SCHLUESSEL
+            assert ki.schluessel() == gespeichert
+            assert ki._schluessel_weg(f"x {gespeichert} y {SCHLUESSEL}") == "x *** y ***"
+            # Der echte Client bekommt den gespeicherten Schlüssel (kein Netz: nur gebaut).
+            assert ki._client().api_key == gespeichert
+            # Notausgang: EINSTELLUNGEN_AUS=1 – nur die .env.
+            os.environ["EINSTELLUNGEN_AUS"] = "1"
+            try:
+                assert ki.schluessel() == SCHLUESSEL
+            finally:
+                os.environ.pop("EINSTELLUNGEN_AUS")
+            os.environ.pop("ANTHROPIC_API_KEY")
+        finally:
+            ctx.pop()
+        # Im Thread eines Laufs (App-Kontext ohne Anfrage) gilt derselbe Stand.
+        gesehen = []
+        def im_thread():
+            with app.app_context():
+                gesehen.append(ki.schluessel())
+        t = threading.Thread(target=im_thread)
+        t.start()
+        t.join(10)
+        assert gesehen == [gespeichert], gesehen
+        # Zurücksetzen: wieder ohne Schlüssel (keine .env), die Liste ohne Recherche.
+        r = adm.delete("/api/admin/einstellungen/ANTHROPIC_API_KEY", headers=H)
+        assert r.status_code == 200 and {x["schluessel"]: x for x in r.json["felder"]}["ANTHROPIC_API_KEY"]["gesetzt"] is False
+        assert "recherche_moeglich" not in adm.get("/api/material/meldungen").json
+        ctx = im_kontext(app)
+        try:
+            assert not ki.verfuegbar()
+            try:
+                ki._client()
+                raise AssertionError("Client ohne Schlüssel gebaut")
+            except ki.LaufFehler as exc:
+                assert "nicht mehr eingerichtet" in str(exc)
+            os.environ["ANTHROPIC_API_KEY"] = SCHLUESSEL
+            assert ki.schluessel() == SCHLUESSEL
+            assert felder()["ANTHROPIC_API_KEY"]["quelle"] == "umgebung"
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            ctx.pop()
+    print("Schlüssel unter Leitstelle → Einstellungen bestanden.")
+
+
 def test_kontingent():
     """Je Kalendermonat in deutscher Zeit; jeder Start zählt (auch gescheiterte, auch ohne Bezug); Grenze aus der
     Umgebung, sonst 20."""
@@ -874,7 +957,8 @@ def test_konto_leeren_statisch():
             ki.aufraeumen()
             assert not os.path.isdir(ki.ordner(lid)) and not os.path.isdir(ki.ordner(999)) \
                 and os.path.isdir(ki.ordner(fertig))
-    # Statisch: ANTHROPIC_API_KEY nur in app/ki.py (dort nur aus os.environ), nicht in Einstellungen, Vorlagen, JS.
+    # Statisch: ANTHROPIC_API_KEY als Zeichenkette nur in app/ki.py (Umgebung und gespeicherter Wert) und als geheimes
+    # Feld in app/einstellungen.py (seit 21.11.2026 auch unter Leitstelle → Einstellungen), nie in Vorlagen und JS.
     wurzel = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app")
     fundstellen = []
     for w, _, namen in os.walk(wurzel):
@@ -885,23 +969,28 @@ def test_konto_leeren_statisch():
                 rel = os.path.relpath(os.path.join(w, n), wurzel)
                 if '"ANTHROPIC_API_KEY"' in inhalt or "'ANTHROPIC_API_KEY'" in inhalt:
                     fundstellen.append(rel)          # als Zeichenkette im Code – nur dort wird er gelesen
-                if n.endswith((".js", ".html")) or n == "einstellungen.py":
+                if n.endswith((".js", ".html")):
                     assert "ANTHROPIC" not in inhalt, rel
                 if n.endswith(".js"):
                     assert "anthropic" not in inhalt.lower(), n
-    assert fundstellen == ["ki.py"], fundstellen
+    assert sorted(fundstellen) == ["einstellungen.py", "ki.py"], fundstellen
     with open(os.path.join(wurzel, "ki.py"), encoding="utf-8") as fh:
         quelle = fh.read()
     import re
-    # Im Code wird der Schlüssel nur über os.environ gelesen (sonst steht er nur in Kommentaren und Docstrings).
-    zugriffe = re.findall(r'(.{0,16})"ANTHROPIC_API_KEY"', quelle)
-    assert zugriffe and all(z.endswith(("os.environ.get(", "os.environ[")) for z in zugriffe), zugriffe
+    # Im Code von ki.py nur zwei Zugriffe: Umgebung und gespeicherter Wert (sonst nur Kommentare und Docstrings).
+    zugriffe = re.findall(r'(.{0,30})"ANTHROPIC_API_KEY"', quelle)
+    assert len(zugriffe) == 2 and sorted(z.endswith("os.environ.get(") for z in zugriffe) == [False, True] \
+        and any(z.endswith(".gespeicherter_wert(") for z in zugriffe), zugriffe
+    from app import einstellungen
+    f = einstellungen.NACH_SCHLUESSEL["ANTHROPIC_API_KEY"]
+    assert f.geheim and f.art == "passwort" and f.gruppe == "Materialablage"
     print("Kontolöschung, Leeren, Aufräumen und statische Prüfung bestanden.")
 
 
 if __name__ == "__main__":
     test_tabelle()
     test_schluessel_und_kosten()
+    test_schluessel_leitstelle()
     test_kontingent()
     test_gespraech()
     test_abbruch_und_tote()
