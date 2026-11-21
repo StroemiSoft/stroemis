@@ -14364,9 +14364,11 @@ Befunde der Sicherheitsprüfung (S…), der Ablaufprüfung (A…) und der Browse
   nicht abgerufen“. Werte aus dem Archivstand der Herstellerseite bleiben mit Vermerk vorbelegt (E5 B).
 - **Dokumentprüfung nach einem Ausweichen** (A1): gelesen wird der Text nach dem `fallback`-Block (hilfsweise Teil und
   Rest zusammen).
-- **„unklar“ zugeordnete Dokumente** (A2): Lebensdauer, Fundstelle und Prüfintervall daraus stehen mit Fundstelle und
-  Vermerk „Dokument nicht sicher zugeordnet“ da, aber **nicht vorbelegt** (bei textilem Material ersetzt das die 10 nach
-  Katalogregel – die Zahl könnte die eines anderen Modells sein); UKCA daraus nur als Hinweis.
+- **„unklar“ zugeordnete Dokumente** (A2): Lebensdauer und Fundstelle daraus stehen mit Fundstelle und Vermerk
+  „Dokument nicht sicher zugeordnet“ da, aber **nicht vorbelegt** (bei textilem Material ersetzt das die 10 nach
+  Katalogregel – die Zahl könnte die eines anderen Modells sein); UKCA daraus nur als Hinweis. Das **Prüfintervall**
+  steht ebenso mit Fundstelle und Vermerk da, ist aber mit 12 vorbelegt – das gilt nach Katalogregel ohnehin
+  (Entscheidung des Nutzers vom 21.11.2026).
 - **Übernahme** (A3): Ob eine Ausführung „schon im Katalog“ steht, entscheidet der Katalog von jetzt (auch „anlegbar“ im
   Vorschlag) – ein inzwischen gelöschtes Produkt lässt sich wieder anlegen. **Nachladen** (O1) hängt nichts an ein
   Produkt mit wieder vergebener Kennung („Das Produkt gibt es nicht mehr.“).

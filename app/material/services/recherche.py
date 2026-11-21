@@ -977,7 +977,8 @@ def _fest(wert, vermerk, beleg="einordnung"):
 
 def _doc_feld(wert, f, stelle, vermerk="", sicher=True):
     """Ein Feld aus einem geprüften Dokument des Herstellers (Aufruf 2). sicher=False: Die Prüfung ordnete das Dokument
-    nicht sicher zu („unklar“) – dann mit Fundstelle und Vermerk, aber nicht vorbelegt (Befund 2 der Prüfung Ablauf)."""
+    nicht sicher zu („unklar“) – dann mit Fundstelle und Vermerk, aber nicht vorbelegt (Befund 2 der Prüfung Ablauf;
+    das Prüfintervall belegt _intervall trotzdem vor)."""
     seite = stelle.get("seite")
     fundstelle = f"{f['titel']}" + (f", Version {f['pruefung']['version']}" if f["pruefung"].get("version") else "") \
         + (f", S. {seite}" if seite else "")
@@ -1116,8 +1117,8 @@ def _lebensdauer(material, hersteller, docs, f1, hinweise, unklar=()):
 
 def _intervall(docs, f1, unklar=()):
     """Das Prüfintervall: im Katalog überall 12, mit dem Zitat des Herstellers (docs: sicher zugeordnete Dokumente,
-    dann die Seite aus der Recherche). Steht es nur in einem Dokument mit Zuordnung „unklar“: mit dessen Fundstelle,
-    aber nicht vorbelegt."""
+    dann die Seite aus der Recherche). Steht es nur in einem Dokument mit Zuordnung „unklar“: mit dessen Fundstelle und
+    Vermerk, trotzdem vorbelegt – die 12 gilt nach Katalogregel ohnehin (Entscheidung des Nutzers vom 21.11.2026)."""
     for sicher, liste in ((True, docs), (False, unklar)):
         if not sicher and f1.get("vorbelegt") and f1.get("zitat"):
             break
@@ -1125,7 +1126,7 @@ def _intervall(docs, f1, unklar=()):
             s = f["pruefung"]["pruefintervall"]
             if s["monate"] and s["zitat"]:
                 v = "" if s["monate"] == INTERVALL else f"Hersteller: {s['monate']} Monate – im Katalog überall 12"
-                return _doc_feld(INTERVALL, f, s, v, sicher=sicher)
+                return dict(_doc_feld(INTERVALL, f, s, v, sicher=sicher), vorbelegt=True)
     if f1.get("vorbelegt") and f1.get("zitat"):
         v = "" if f1["wert"] == INTERVALL else f"Hersteller: {f1['wert']} Monate – im Katalog überall 12"
         return dict(f1, wert=INTERVALL, vermerk="; ".join(x for x in (f1["vermerk"], v) if x))
@@ -1258,7 +1259,8 @@ def zusammenfuehren(ergebnis, dateien, eingabe, usage=()):
         nr = e["felder"]["article_no"]["wert"]
         geprueft = [f for f in liste if f.get("pruefung") and f["art"] != "produktbild" and _gilt_fuer(f, i, nr)]
         # Werte vorbelegen nur aus Dokumenten, die laut Prüfung sicher dazugehören; „unklar“ nur mit Fundstelle und
-        # Vermerk, nicht vorbelegt (Befund 2 der Prüfung Ablauf vom 21.11.2026, Empfehlung).
+        # Vermerk, nicht vorbelegt (Befund 2 der Prüfung Ablauf vom 21.11.2026, Empfehlung) – außer dem Prüfintervall,
+        # das nach Katalogregel ohnehin 12 ist.
         texte = [f for f in geprueft if f["pruefung"]["passt"] == "ja"]
         unklar = [f for f in geprueft if f["pruefung"]["passt"] == "unklar"]
         erkl = [f for f in texte if f["art"] == "konformitaetserklaerung"]

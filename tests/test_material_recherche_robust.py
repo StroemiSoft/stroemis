@@ -314,8 +314,9 @@ def test_ergebnis_robust():
 
 def test_pruefung_ausweichen_unklar_abgerufen():
     """A1: Die Dokumentprüfung liest nach einem Ausweichen mitten in der Ausgabe den Text nach dem fallback-Block.
-    A2: Lebensdauer und Intervall aus einer Anleitung mit Zuordnung „unklar“ stehen mit Fundstelle und Vermerk da,
-    aber nicht vorbelegt (statt 10 nach Katalogregel). Hinweis S1/A1: Eine Fundstelle auf der Herstellerdomain, die
+    A2: Lebensdauer aus einer Anleitung mit Zuordnung „unklar“ steht mit Fundstelle und Vermerk da, aber nicht vorbelegt
+    (statt 10 nach Katalogregel); das Intervall steht mit Fundstelle und Vermerk da und ist trotzdem mit 12 vorbelegt
+    (Entscheidung des Nutzers vom 21.11.2026). Hinweis S1/A1: Eine Fundstelle auf der Herstellerdomain, die
     Claude nie abgerufen hat, ist nur Identifikation."""
     from app import ki
     from app.material.services import meldung, recherche
@@ -361,7 +362,8 @@ def test_pruefung_ausweichen_unklar_abgerufen():
             lj, iv, q = (v["gemeinsam"].get(x) or a1["felder"][x] for x in ("lifetime_years", "interval_months",
                                                                               "lifetime_source"))
             assert lj["wert"] == 5 and not lj["vorbelegt"] and recherche.NICHT_SICHER in lj["vermerk"], lj      # A2
-            assert not iv["vorbelegt"] and iv["zitat"] and recherche.NICHT_SICHER in iv["vermerk"], iv
+            assert iv["vorbelegt"] and iv["wert"] == 12 and iv["zitat"] and "anleitung" in iv["quelle_url"] \
+                and recherche.NICHT_SICHER in iv["vermerk"], iv
             assert not q["vorbelegt"] and "anleitung" in q["quelle_url"], q
             assert not dateien["anleitung.pdf"]["vorgewaehlt"] and dateien["anleitung.pdf"]["anbieten"]
             nr1, nr2 = a1["felder"]["article_no"], a2["felder"]["article_no"]
