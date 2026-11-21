@@ -113,6 +113,7 @@ Geschichte stehen. Schemaversion nach der Nachbesserung vor dem Merge: 30; mit d
 | Klappbox-Titel mit Formatierung | Fett, kursiv, Code und Links im Titel einer Klappbox erscheinen in der Leseansicht formatiert (vorher standen die Sternchen da) | gebaut 11.11.2026 (kein Schemaschritt) |
 | Spaltenabschnitt an der Schreibstelle | Ein „:::“ ohne Schlusszeile (etwa ein Hinweis, dessen „:::“ am Ende der letzten Textzeile steht) gilt im Editor nicht mehr als Abschnitt bis zum Artikelende – ein neuer Spaltenabschnitt kommt wieder an den Schreibstrich statt ans Artikelende | gebaut 11.11.2026 (kein Schemaschritt) |
 | Kopfleiste der Entwicklung | Auf dev.strömis.de „Entwicklungsserver“ statt „Strömungsrettung“, darunter „dev.strömis.de“; Maskottchen mit Leitkegel als Hut (Kopfleiste, Anmeldung, öffentliche Strömipedia, Hinweisseite ohne Netz); Produktion unverändert | gebaut 11.11.2026 (kein Schemaschritt), Zweig dev-kopf |
+| Recherche per Claude API an Produktmeldungen | Material-Verwaltung lässt zu einer offenen Meldung recherchieren (Claude API, gemeinsamer Baustein `app/ki.py`, Tabelle `ki_laeufe` im Kernschema): Vorschlag je Ausführung mit Fundstellen nach den Katalogregeln, Downloads nur von Herstellerdomains, Dokumentprüfung je PDF, Übernahme mehrerer Ausführungen auf einmal; nur mit `ANTHROPIC_API_KEY`. Schnittstelle (KERN) und Oberfläche (Knopf und Statuszeile an der Meldung, Startdialog, „Vorschlag ansehen“, Übernahme); Nachbesserung nach Sicherheits-, Ablauf- und Browserprüfung | gebaut 21.11.2026 (kein Schemaschritt der Materialablage, Schema bleibt 40) |
 
 ## Abgleich mit dem Bestand (vor Lieferung 1)
 
@@ -14225,3 +14226,183 @@ stehen, dass es der Testserver und nicht die Produktion ist.
 - README nachgezogen.
 
 **Tests**: neu `tests/test_freigabe_mail_dev.py` – Freigabe auf dev mit Hinweis und Fehleradresse, in der Produktion ohne.
+
+## Recherche per Claude API an Produktmeldungen – KERN (Wunsch, 21.11.2026)
+
+Wunsch: An „Produkt melden“ soll eine Recherche per Claude API hängen – Katalogfelder mit Fundstelle nach den
+Katalogregeln, Dateien wie beim Katalogimport, Ergebnis nur als Vorschlag, übernommen durch einen Menschen. Entwurf
+`planung/material-phase4/entwurf_meldung_recherche.md`, Entscheidungen des Nutzers vom 21.11.2026 (Abschnitt 6): gemeinsamer
+Baustein mit dem späteren Artikelentwurf der Strömipedia, D2 B, E2 B, E4 B, E5 B, K1 Plan B, Kontingent 20, sonst A.
+Dieser Teil ist der Server (KERN); die Oberfläche steht im folgenden Abschnitt.
+
+- **Gemeinsamer Baustein** `app/ki.py` und Tabelle **`ki_laeufe`** im Kernschema (`app/db.py`, additiv, `IF NOT
+  EXISTS`): Art ohne CHECK (nur nicht leer, erlaubte Arten in `ki.ARTEN`), Status mit `beendet_am`-CHECK, eindeutiger
+  Teilindex „höchstens ein laufender Lauf je Art“, Bezug als Text (`mat_meldung:<id>`). Client-Fabrik `ki.CLIENT`
+  (Schlüssel nur aus `os.environ`, das SDK sucht keine anderen Zugangsdaten; SDK-Log auf WARNING), `verfuegbar()`,
+  Preise von Opus 5.5 und `kosten_cent` aus `usage` (je Durchgang nach `usage.iterations`, Ausweichmodell erkannt),
+  Kontingent je Kalendermonat deutscher Zeit (`MATERIAL_RECHERCHE_JE_MONAT`, Vorgabe 20, jeder Start zählt), Start unter
+  `BEGIN IMMEDIATE`, Daemon-Thread mit Anfragekontext, Puls-Thread (Lebenszeichen alle 10 s, Abbruch-Kennzeichen,
+  Zeitgrenze 20 Minuten – schließt einen hängenden Stream), tote Läufe nach 120 s, Ordner je Lauf
+  `DATA_DIR/ki/<id>` (0700). Gesprächsschleife mit Ereignis-Schleife des Streams und `get_final_message()`, Inhalt
+  unverändert angehängt (nach einem Ausweichen mitten in der Ausgabe ohne Denk- und Werkzeugblöcke vor dem
+  `fallback`-Block, wie die SDK-Doku verlangt), `pause_turn` höchstens 5, eigene Werkzeuge (alle Ergebnisse in einer Nutzernachricht, Fehler als
+  `is_error`), `refusal` mit Kategorie, `max_tokens`, eine Nachfrage, unlesbares Werkzeug-JSON höchstens zweimal neu.
+  Fehlerkette des SDK als Sätze ohne Schlüssel und Rohantwort (ins Protokoll Klasse, Status, `request-id`).
+- **Recherche** (`services/recherche.py`): Aufruf 1 mit Websuche frei (höchstens 8), Abruf nur Herstellerdomains, Links
+  der Meldung und `web.archive.org` (höchstens 12), adaptives Denken, Effort `high`, `fallbacks: "default"` (Beta
+  `server-side-fallback-2026-07-01`), Zwischenspeicher auf der Anweisung, Ergebnis über das eigene Werkzeug
+  `ergebnis_abgeben` (ohne `strict`, Eingabe im Code geprüft, bei Verstoß Fehlerliste als `is_error`, höchstens zweimal);
+  Regelauszug wörtlich aus REGELN.md in `services/recherche_regeln.md` (Stand im Kopf). Downloads
+  (`services/recherche_netz.py`): nur https, Herstellerdomains samt Subdomains, Webarchiv nur mit Original dort (Roh-Fassung
+  `…id_/`), DNS aufgelöst und nur öffentliche Adressen, Verbindung zu genau der geprüften Adresse, Weiterleitungen von
+  Hand (höchstens 3, jede neu geprüft), Magic Bytes, Größe beim Lesen, 60 s je Datei, PDF mit pypdf geprüft. Aufruf 2 je
+  PDF (gleicher Inhalt einmal) mit Structured Output: zu welchen Artikelnummern, Version, Datum, Normen, Lebensdauer,
+  Prüfintervall, UKCA (Umfang nach F1 A). Zusammenführen im Code: Norm aus der passenden Erklärung + Zusatz der Seite
+  (ohne CE, UKCA zuletzt, Einschränkungen als Hinweis), Lebensdauer textil min(Hersteller, 10) bzw. 10 mit Vermerk,
+  Edelrid 10, Metall leer, Intervall 12 mit Vermerk ohne Zitat, Werte von Nicht-Herstellerquellen nie vorbelegt, gleiche
+  SHA-256 einmal, Dubletten gegen den Katalog je Ausführung, Dateien „gehört nicht dazu“ nicht angeboten (F3 A).
+- **Übernahme** mehrerer Ausführungen (E4 B): `POST …/recherche/uebernehmen` legt alle gewählten Produkte über
+  `katalog.produkt_anlegen` in einer Transaktion an und erledigt die Meldung (`product_id` = die gemeldete
+  Artikelnummer, sonst die erste; Journal „eingepflegt“ nennt alle; Mail an den Melder nennt bei mehreren alle); danach
+  Dateien je Produkt (`dokument_anlegen`, `produkt_bild_setzen`), Teilfehler in der Antwort; `…/nachladen` hängt nur
+  Fehlendes an (gleiche SHA-256 und Art am Produkt bzw. Bild schon gesetzt → übersprungen). Ausführungen, die schon im
+  Katalog stehen, sind nicht anlegbar (409 mit dem vorhandenen Produkt).
+- **Routen** (`routes_recherche.py`, alle nur Material-Verwaltung, ohne Schlüssel 503): Start (202), Stand, Abbrechen,
+  Datei ausliefern (CSP mit sandbox, nosniff, no-store), Übernehmen, Nachladen. `GET /meldungen` trägt für die
+  Material-Verwaltung mit Schlüssel je Meldung `recherche` und oben `recherche_moeglich`.
+- **Journal** (entity `recherche`, nur für die Material-Verwaltung, auch am Produkt): „Recherche gestartet“,
+  „Recherche beendet“, „Recherche übernommen“ – Beschriftungen in `beschriftung.py` und `material.js`.
+- **Wechselwirkungen**: Meldung löschen → Inhalt und Dateien der Läufe weg (die Zeilen bleiben fürs Kontingent);
+  Erledigen, Zuordnen, Ablehnen bricht einen laufenden Lauf ab; Kontolöschung → „(gelöschtes Konto)“; Tageslauf räumt
+  tote Läufe und Dateien (30 Tage nach dem Erledigen); `dev-zuruecksetzen` löscht die Läufe der Recherche samt Ordnern,
+  `dev-bestand-leeren` lässt sie (entity `recherche` in `JOURNAL_BLEIBT`). Übung: unverändert (kein Feld, kein Knopf).
+- **Kein Schemaschritt** der Materialablage: Schritt 41 aus dem Entwurf entfällt, alles Meldungs-Eigene steht in
+  `eingabe_json`/`ergebnis_json`. `requirements.txt`: `anthropic==1.17.0` (letzte 1.x). `.env.example`,
+  `docker-compose.yml` (Kommentar) und README („Recherche per Claude API (Materialablage)“ samt Zeile fürs Verzeichnis der
+  Verarbeitungstätigkeiten) nachgezogen.
+
+**Tests**: neu `tests/test_ki.py` (Tabelle, Schlüssel, Kosten, Kontingent, Gesprächsschleife, Abbruch, Zeitgrenze, tote
+Läufe, gleichzeitige Starts, echter SDK-Client gegen einen MockTransport für Parameter und Fehlerkette, Kontolöschung,
+statisch: Schlüssel nur in `app/ki.py`) und `tests/test_material_recherche.py` (Downloads gegen einen lokalen
+HTTPS-Server mit eigenem Zertifikat und eingesetztem Auflöser, ganzer Lauf über die Routen, Vorschlag, Mehrfach-Übernahme
+mit Teilfehler und Nachladen, Rechte je Rolle, Kontingent, eine app-weit, Erledigen bricht ab, Fotos ohne EXIF, Meldung
+löschen, Kontolöschung, dev-bestand-leeren, dev-zuruecksetzen, Tageslauf, Zusammenführen nach den Katalogregeln).
+Keine echten API-Aufrufe.
+
+## Recherche per Claude API an Produktmeldungen – OBERFLÄCHE (21.11.2026)
+
+Fortsetzung des KERN (Auftrag `planung/material-phase4/auftrag_ki_recherche_oberflaeche.md`). Nur die Material-Verwaltung
+und nur mit `ANTHROPIC_API_KEY` – ohne das Feld `recherche_moeglich` (anderer Rolle, Übung, kein Schlüssel) fehlen Knopf und
+Statuszeile ganz.
+
+- **Karte der Meldung** (Produktmeldungen): an einer offenen Meldung der graue Knopf **„Recherchieren lassen“** neben
+  „Produkt anlegen“, „Vorhandenes zuordnen“, „Ablehnen“ – nach einem Lauf „Erneut recherchieren“. Geht gerade kein Start
+  (Kontingent aufgebraucht, eine Recherche läuft woanders), ist er `aria-disabled` und der Grund steht als Satz über der
+  Knopfzeile. Darunter eine **Statuszeile** (kein Kasten): läuft (`role="status"`, „Recherche läuft – Dateien werden
+  geprüft (2 von 5)“, Textknopf „Abbrechen“ mit Rückfrage), fertig (Datum, Name, Kosten, grauer Knopf „Vorschlag
+  ansehen“), gescheitert bzw. abgebrochen (mit Grund und Kosten), übernommen („Aus der Recherche vom … angelegt: …“ mit
+  Links zu den Produkten, auch an der erledigten Meldung). Solange ein Lauf wartet oder läuft und die Seite sichtbar ist,
+  fragt sie alle 5 s nach; am Ende meldet ein Toast „fertig“, „abgebrochen“ oder „gescheitert“ und die Liste zeichnet
+  sich neu (der Fokus bleibt auf seinem Knopf).
+- **Startdialog** „Recherche für „Hersteller Modell““: Feld „Herstellerseite“ (1–3 Domains, vorbelegt), Häkchen „n Fotos
+  mitschicken“ und „Bemerkung mitschicken“ nur, wenn es sie gibt, Vorgabe aus; die Bemerkung steht darüber zur Kontrolle.
+  Sichtbar, was an Anthropic geht, und das Kontingent („noch 19 von 20 in diesem Monat“); ersetzt die Recherche einen
+  Vorschlag, sagt ein Satz es. 400 am Feld, 409/429/503 als Satz über der Knopfzeile (Knopf aus).
+- **Dialog „Vorschlag ansehen“** (breit, am Telefon Karten): „Gemeinsam“ als Tabelle Feld | Vorschlag | Fundstelle (Link,
+  Zitat, Marke „belegt“ / „Webarchiv“ / „nur Identifikation“ / „nicht belegt“, Vermerk; „wird nicht vorbelegt“ am Wert),
+  „Ausführungen“ (Artikelnummer, Bemerkung, abweichende Felder, Bild, „steht schon im Katalog als …“), „Dateien“ (Art,
+  Version, gültig ab, Größe, Herkunft samt Webarchiv-Stand, Prüfergebnis „gehört zu …“ / „gehört nicht dazu: …“, „liegt
+  schon im Katalog als …“, „Öffnen“; nicht geladene mit Grund und Link), Hinweise, Rückfragen, Ausweichmodell. Hauptaktion
+  „Produkte anlegen“ (bei einer anlegbaren Ausführung „Produkt anlegen“) nur an einer offenen Meldung mit fertigem
+  Vorschlag; an einer übernommenen grau „Fehlendes nachladen“.
+- **Übernahme** in einem Dialog für alle Ausführungen: die gemeinsamen Felder aus den **Bausteinen des Produktdialogs**
+  (`produktFelderHtml`/`produktFelderVerdrahten`, aus `produktDialog` herausgelöst – dort unverändert), vorbelegt nur
+  `vorbelegt: true`, die Fundstelle als Hilfetext am Feld. Je Ausführung Häkchen „anlegen“ (vorgewählt die gemeldete
+  Artikelnummer, ohne sie bzw. wenn sie fehlt alle anlegbaren), Artikelnummer (mit Warnung „schon vergeben“) und
+  Bemerkung, die je Ausführung verschiedenen Felder, Häkchen „Bild übernehmen“; Ausführungen im Katalog ohne Häkchen mit
+  Link. „Dateien aus der Recherche“ mit Vorwahl laut Prüfung, je Datei für die Ausführungen laut `gehoert_zu`; nicht
+  angebotene mit Grund und Link. „Anmerkung für den Melder“ wie bisher. Danach Toast („2 Produkte angelegt, 5 Dateien
+  angehängt“); fehlen Dateien, zeigt der Dialog sie mit grauem Knopf „Fehlendes nachladen“. Fehler „Ausführung n …“ an
+  der Ausführung.
+- **Schnittstelle**: Der kurze Stand eines übernommenen Laufs (`recherche` in `GET /meldungen` und `GET …/recherche`)
+  trägt `produkte` (`id`, `manufacturer`, `model`, `description`, `article_no`) – nur Produkte, die es noch gibt und die
+  nicht nach der Übernahme entstanden (SQLite vergibt die Kennung eines gelöschten Produkts neu).
+  Der Satz für den Startdialog heißt in `start` jetzt `datenschutz` (vorher `an_anthropic`) – die Oberfläche nennt den
+  Anbieter nicht im Code (Test „Schlüssel nur in `app/ki.py`“).
+- Der bisherige Weg „Produkt anlegen“ an der Karte bleibt, wie er ist; Übung unverändert (kein Feld, kein Knopf).
+
+**Tests**: `tests/test_material_recherche.py` – `produkte` im Stand (auch nach Löschen und neu vergebener Kennung) und
+`test_oberflaeche_statisch` (Knopf nur mit `recherche_moeglich`, eine rote Hauptaktion je Dialog, Nachfragen nur bei
+laufendem Lauf und sichtbarer Seite, Feldbausteine des Produktdialogs, Links nur http(s), keine Touch-Regeln außerhalb
+von `pointer: coarse`); `tests/test_material_beschreibung.py` liest die Felder seitdem aus `produktFelderHtml`.
+
+## Recherche per Claude API an Produktmeldungen – Nachbesserung (21.11.2026)
+
+Befunde der Sicherheitsprüfung (S…), der Ablaufprüfung (A…) und der Browserprüfung (B…/V…) vom 21.11.2026 (Auftrag
+`planung/material-phase4/auftrag_ki_recherche_nachbesserung.md`). Kein Schemaschritt.
+
+- **Downloads gegen tröpfelnde Server** (S1): gelesen wird mit `read1` (kehrt nach jedem Empfang zurück), die Frist
+  gilt nach jedem Stück und schon für die Kopfzeilen; ein Wächter beendet den Socket, wenn sie um ist. Der Lauf kennt
+  den offenen Download-Socket – „Abbrechen“ und die Zeitgrenze von 20 Minuten beenden ihn mit `shutdown()`, die
+  app-weite Sperre ist danach sofort frei. Eine Datei, die kürzer ankommt als angekündigt, wird abgelehnt.
+- **Abbruch beim echten SDK** (S2): Puls und „Abbrechen“ erreichen auch den Socket unter dem Stream des SDK (httpx2:
+  `network_stream`) und wecken das blockierte Lesen mit `shutdown()` – vorher endete ein Lauf erst mit den nächsten
+  Bytes der API. Je Lauf steht der größte Abstand zwischen zwei rohen Stream-Ereignissen (samt `ping`) im Protokoll
+  („KI-Lauf n: größter Abstand …“), damit die Lese-Zeitgrenze (600 s) nach einer Messung auf dev gesenkt werden kann.
+- **Ergebnis robust** (S3, S9): Eine Materialart als Liste oder Objekt ist ein Verstoß (kein TypeError), jede Ausnahme
+  der Prüfung zählt als Verstoß („Eingabe nicht lesbar“); scheitert dasselbe eigene Werkzeug zweimal, endet das
+  Gespräch. Hinweise und Rückfragen als Text sind eine Zeile.
+- **Kein doppeltes Anhängen** (S4): gleiche SHA-256 und Art am Produkt wird in derselben Schreibtransaktion wie das
+  Einfügen geprüft (`katalog.dokument_anlegen(…, ohne_doppelte=True)`); das Bild wird frisch geprüft.
+- **Fotos** (S5) gehen ohne JPEG-Kommentar und XMP an die API.
+- **Adressen** (S6, Hinweis S2): Backslash, Leer-/Steuerzeichen und Zugangsdaten gelten nirgends (Beleg „fremd“,
+  Schemafehler an Claude, kein Download) – auch nicht als Original einer Webarchiv-Adresse; geladen wird eine aus den
+  geprüften Teilen neu zusammengesetzte Adresse. Downloads nur auf Port 443; NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`)
+  und IPv4-kompatibles IPv6 (`::a.b.c.d`) gelten nicht als öffentlich.
+- **Beleg nur für Gelesenes** (Hinweis S1/A1): „hersteller“ bzw. „webarchiv“ nur, wenn Claude die Seite im Gespräch mit
+  `web_fetch` abgerufen hat oder sie eine geladene Datei ist – sonst „nur Identifikation“ mit Vermerk „Seite im Gespräch
+  nicht abgerufen“. Werte aus dem Archivstand der Herstellerseite bleiben mit Vermerk vorbelegt (E5 B).
+- **Dokumentprüfung nach einem Ausweichen** (A1): gelesen wird der Text nach dem `fallback`-Block (hilfsweise Teil und
+  Rest zusammen).
+- **„unklar“ zugeordnete Dokumente** (A2): Lebensdauer und Fundstelle daraus stehen mit Fundstelle und Vermerk
+  „Dokument nicht sicher zugeordnet“ da, aber **nicht vorbelegt** (bei textilem Material ersetzt das die 10 nach
+  Katalogregel – die Zahl könnte die eines anderen Modells sein); UKCA daraus nur als Hinweis. Das **Prüfintervall**
+  steht ebenso mit Fundstelle und Vermerk da, ist aber mit 12 vorbelegt – das gilt nach Katalogregel ohnehin
+  (Entscheidung des Nutzers vom 21.11.2026).
+- **Übernahme** (A3): Ob eine Ausführung „schon im Katalog“ steht, entscheidet der Katalog von jetzt (auch „anlegbar“ im
+  Vorschlag) – ein inzwischen gelöschtes Produkt lässt sich wieder anlegen. **Nachladen** (O1) hängt nichts an ein
+  Produkt mit wieder vergebener Kennung („Das Produkt gibt es nicht mehr.“).
+- **Wettläufe** (A4, A6): Wird die Meldung erledigt, während der Start läuft, bricht der Lauf ab, bevor er etwas fragt.
+  Wird das Konto, das gestartet hat, während des Laufs gelöscht, steht „Recherche beendet“ ohne Kennung im Journal.
+- **Kosten** (A5): Bricht eine Antwort mitten im Stream ab, zählt ihr Zwischenstand (Zeile „unvollstaendig“); die
+  Anzeige sagt dann „mindestens ca. … $“ (`kosten_unvollstaendig` im Stand).
+- **Tote Läufe** (Hinweis A2) bekommen „Recherche beendet“ (abgebrochen, „Unterbrochen – der Server wurde neu
+  gestartet.“) im Journal – im Namen dessen, der gestartet hat (`ki.bei_tod`).
+- **Herstellerseite** (Hinweis S3): Gemeinsame Endungen (github.io, co.uk, amazonaws.com, sharepoint.com, dropbox.com …,
+  feste Liste in `recherche_netz.py`) werden nicht vorgeschlagen und beim Bestätigen abgelehnt; Domains aus einem Link
+  der Meldung kennzeichnet der Startdialog („Aus einem Link der Meldung: … – bitte prüfen“, `start.domains_aus_links`).
+- **Ohne API-Schlüssel** (V2, Empfehlung der Browserprüfung): Was schon da ist, bleibt lesbar – Statuszeile, „Vorschlag
+  ansehen“, Dateien, Übernahme und Nachladen brauchen keinen Aufruf der API. Nur „Recherchieren lassen“ fehlt, Start und
+  Abbrechen antworten 503; `GET /meldungen` trägt `recherche`, aber kein `recherche_moeglich`.
+- **Oberfläche**: Fokus nach dem Wechsel des Dialoginhalts auf die Überschrift bzw. auf „Fehlendes nachladen“ (B1), beim
+  Öffnen von „Vorschlag ansehen“ auf die Überschrift (V9); Fehler zur Artikelnummer einer Ausführung über
+  `S.feldFehler` am Feld (B2); Satz „Alle Ausführungen stehen schon im Katalog … ‚Vorhandenes zuordnen‘“, wenn nichts
+  anlegbar ist (V1); leere Felder zeigen in der Tabelle „–“ und fehlen in den Karten, die Knopfzeile klebt am Telefon
+  unten (V3); Tabelle → Karten nach der Dialogbreite (Container, 640 px) statt bei 860 px Fensterbreite (V4); „Fehlendes
+  nachladen“ nur, wenn etwas fehlt (`fehlt` im Stand), im Dialog „Nicht alle Dateien angehängt“ als rote Hauptaktion
+  (V5); der Sperrgrund (Kontingent, läuft woanders) steht einmal über der Liste (`.notice`, die Knöpfe verweisen mit
+  `aria-describedby` darauf) (V6); Texte: „zu lang und abgeschnitten – bitte erneut versuchen“ ohne `max_tokens`,
+  keine „ca. 0,00 $“, ein Satz zur Recherche in der Einleitung der Seite, was an Anthropic geht als kurze Liste
+  (`start.datenschutz` = `{titel, gesendet, nie}`), Dateititel als Linktext, Zeit und Name als Einheit (V7); Norm und
+  Fundstelle der Lebensdauer in der Übernahme zweizeilig (V8); Esc im Übernahme-Dialog fragt nach, wenn etwas geändert
+  ist; abgewählte Ausführungen sind `inert` (V9).
+
+Bewusst nicht in dieser Nachbesserung: Kostendeckel je Lauf, CPU bei `extract_text` langer PDFs, Pinning der
+Abhängigkeiten von `anthropic`, Wechsel auf anthropic 2.x (eigener Schritt nach der Handprüfung); die Lese-Zeitgrenze
+bleibt 600 s, bis die Messung auf dev vorliegt.
+
+**Tests**: neu `tests/test_material_recherche_robust.py` (tröpfelnder bzw. stummer Server, Adressen, Fotos, Ergebnis,
+Ausweichen/„unklar“/abgerufen, Übernahme samt gleichzeitigem Nachladen und wieder vergebener Kennung, Wettlauf,
+Kontolöschung, tote Läufe, Domains); in `tests/test_ki.py` der echte SDK-Client gegen einen lokalen schweigenden
+SSE-Server (Abbrechen, Zeitgrenze, Abstand mit `ping`), Zwischenstand der Kosten, Werkzeug zweimal gescheitert,
+Nacharbeit toter Läufe; `tests/test_material_recherche.py` an den Leseweg ohne Schlüssel und die Oberfläche angepasst.
