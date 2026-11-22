@@ -152,7 +152,7 @@ AKTION = {
     "standard_gesetzt": "Standard-Prüfformular gesetzt", "standard_geloest": "Standard-Prüfformular gelöst",
     # Recherche per Claude API an einer Produktmeldung (21.11.2026)
     "recherche_gestartet": "Recherche gestartet", "recherche_beendet": "Recherche beendet",
-    "recherche_uebernommen": "Recherche übernommen",
+    "recherche_uebernommen": "Recherche übernommen", "recherche_nachgeladen": "Recherche nachgeladen",
 }
 ENTITAET = {"item": "Artikel", "product": "Produkt", "document": "Dokument", "form": "Formular", "folder": "Ordner",
             "category": "Kategorie", "user": "Konto", "inspection": "Prüfung", "round": "Durchgang",

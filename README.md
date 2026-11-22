@@ -671,7 +671,7 @@ der API und bleibt erreichbar.
 - **Dateien:** `DATA_DIR/ki/<Lauf>/` (0700/0600). Weg, sobald ein Lauf scheitert oder abbricht, ein neuer ihn ersetzt
   oder die Meldung gelöscht wird; nach der Übernahme 30 Tage nach dem Erledigen der Meldung (Tageslauf). Läufe ohne
   Meldung: 30 Tage nach ihrem Ende, sofort bei einem neueren eigenen Lauf ohne Meldung, bei „Verwerfen“ und beim
-  Löschen des Kontos (dann auch Eingabe und Vorschlag). Die Zeilen in
+  Löschen des Kontos (Eingabe und Vorschlag bleiben dann stehen, nur der Name wird „(gelöschtes Konto)“). Die Zeilen in
   `ki_laeufe` bleiben fürs Kontingent (beim Löschen der Meldung ohne Inhalt). `flask material dev-zuruecksetzen` löscht
   die Läufe der Recherche samt Ordnern, `dev-bestand-leeren` lässt sie stehen.
 - **Datenschutz:** An Anthropic gehen Hersteller, Modell, Artikelnummer, Norm und Kategorie-Vorschlag der Meldung, ihre
@@ -688,7 +688,8 @@ der API und bleibt erreichbar.
   Kategorien: Produktangaben, optional Fotos von Etiketten und die Bemerkung des Melders (können Personenbezug haben);
   Empfänger: Anthropic PBC (Claude API, USA) als Auftragsverarbeiter; Löschung: Eingabe und Vorschlag mit der Meldung,
   Dateien 30 Tage nach dem Erledigen (ohne Meldung: nach dem Ende des Laufs); beim Löschen des Kontos, das gestartet
-  hat, wird der Name am Lauf „(gelöschtes Konto)“, Läufe ohne Meldung verlieren dann auch Eingabe und Vorschlag.* (Übersicht auch im Kopf von
+  hat, wird der Name am Lauf „(gelöschtes Konto)“; Eingabe und Vorschlag eines Laufs ohne Meldung (ohne Personendaten)
+  bleiben, seine Dateien gehen sofort.* (Übersicht auch im Kopf von
   `app/material/services/loeschung.py`.)
 
 ### Erinnerungsmails (Materialablage)

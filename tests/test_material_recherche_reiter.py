@@ -533,18 +533,169 @@ def test_anhaengen_aus_meldung():
     print("Anhängen aus einer Meldung bestanden.")
 
 
+def test_nachbesserung_anhaengen():
+    """Nachbesserung nach den Prüfungen (22.11.2026): nr und Dateien nur als ganze Zahl (S4); eine Ausführung, die
+    schon als anderes Produkt im Katalog steht, hängt nicht an (AB3); ein Produkt hat genau eine Ausführung (S2, 409),
+    nachgewählte Dateien stehen als „Recherche nachgeladen“ im Journal; am Produkt nur die Übernahmen DIESES Produkts,
+    aus dem Journal bestimmt – auch nach geleertem Lauf und Kontolöschung, nicht an einer wieder vergebenen Kennung
+    (S1, O1); ohne anlegbare Ausführung zeigt der Reiter den Start, gleich in welchem Status (AB4); ein ersetzter Lauf
+    nimmt nichts mehr an und gilt nicht als übernommen (AB2, ohne und mit Meldung); nach der Frist der Dateien zeigt
+    der Reiter den Vorschlag nicht mehr, schon bevor der Tageslauf aufräumt (AB1)."""
+    import time
+    from app import db, ki
+    from app.material.services import meldung, recherche
+    with tempfile.TemporaryDirectory() as tmp:
+        server, alt_netz, app, k, ids, gid = _umgebung(tmp)
+        alt_mail = mails_abfangen(meldung)
+        kat = k["katalog"]
+        try:
+            zweite, uid2 = neues_konto(app, "katalog2@example.org", "lesen", rechte={"material": 3})
+            z, _ = recherchieren(zweite, app, Attrappe(antworter(server, ids["gurte"], {"geprueft": []})),
+                                 formular(ids["gurte"]))
+            lid = z["id"]
+            v = zweite.get(BASIS).json["recherche"]["vorschlag"]
+            d = dateien_nach_name(v)
+            anl, erkl = d["anleitung.pdf"]["n"], d["erklaerung.pdf"]["n"]
+            pid1 = produkt_anlegen(zweite, ids, "PR-1")
+            weg = f"{BASIS}/{lid}/anhaengen"
+            # S4: nr nur als ganze Zahl, Dateien ebenso.
+            for falsch in (1.0, "1", True, [1], None):
+                r = zweite.post(weg, json={"product_id": pid1, "nr": falsch}, headers=H)
+                assert r.status_code == 400 and "Unbekannte Ausführung" in r.json["error"], (falsch, r.get_json())
+            r = zweite.post(weg, json={"product_id": pid1, "nr": 1, "dateien": [float(anl)]}, headers=H)
+            assert r.status_code == 400 and "nicht angebotene" in r.json["error"], r.get_json()
+            # AB3: Ausführung 1 steht als PR-1 im Katalog – an ein anderes neues Produkt hängt sie nicht an.
+            fremd = produkt_anlegen(zweite, ids, "FX-77", model="Fremd Probe")
+            r = zweite.post(weg, json={"product_id": fremd, "nr": 1, "dateien": [anl]}, headers=H)
+            assert r.status_code == 409 and "Ausführung 1 steht schon im Katalog als" in r.json["error"] \
+                and "PR-1" in r.json["error"], r.get_json()
+            with app.app_context():
+                assert ki.zeile(lid)["status"] == "fertig"
+            # S2: PR-1 kommt aus Ausführung 1 – eine andere Ausführung lehnt anhaengen danach ab.
+            r = zweite.post(weg, json={"product_id": pid1, "nr": 1, "dateien": [anl], "felder": ["norm"]}, headers=H)
+            assert r.status_code == 200 and r.json["anhaengen"]["angehaengt"] == 1, r.get_json()
+            r = zweite.post(weg, json={"product_id": pid1, "nr": 2, "dateien": [anl]}, headers=H)
+            assert r.status_code == 409 and r.json["error"] == "Dieses Produkt wurde aus Ausführung 1 angelegt.", \
+                r.get_json()
+            # Später dazugewählt: Erklärung und Bild – „Recherche nachgeladen“ mit genau diesen, ohne „felder“.
+            r = zweite.post(weg, json={"product_id": pid1, "nr": 1, "dateien": [anl, erkl], "bild": True}, headers=H)
+            assert r.status_code == 200 and r.json["anhaengen"] == {"angehaengt": 2, "uebersprungen": 1, "fehler": []}, \
+                r.get_json()
+            # Eine bloße Wiederholung schreibt nichts.
+            assert zweite.post(weg, json={"product_id": pid1, "nr": 1, "dateien": [anl, erkl], "bild": True},
+                               headers=H).json["anhaengen"]["angehaengt"] == 0
+            with app.app_context():
+                ue = json.loads(ki.zeile(lid)["ergebnis_json"])["uebernahme"]
+                assert [(e["nr"], e["product_id"], e["dateien"], bool(e["bild"])) for e in ue["produkte"]] \
+                    == [(1, pid1, sorted([anl, erkl]), True)], ue
+                e = db.query("SELECT action, after_json FROM mat_audit WHERE entity = 'ki_lauf' AND entity_id = ? "
+                             "ORDER BY id", (lid,))
+                assert [x["action"] for x in e] == ["recherche_gestartet", "recherche_beendet", "recherche_uebernommen",
+                                                    "recherche_nachgeladen"], [x["action"] for x in e]
+                nach = json.loads(e[-1]["after_json"])
+                assert nach["produkte"] == [pid1] and nach["ausfuehrung"] == 1 and "felder" not in nach \
+                    and len(nach["dateien"]) == 2 and nach["dateien"][0].startswith("Konformitätserklärung") \
+                    and nach["dateien"][1].startswith("Produktbild"), nach
+            # S1: ein zweites Produkt aus Ausführung 2 – an jedem Produkt nur seine eigenen Übernahmen.
+            pid2 = produkt_anlegen(zweite, ids, "PR-2")
+            assert zweite.post(weg, json={"product_id": pid2, "nr": 2}, headers=H).status_code == 200
+
+            def ki_journal(pid):
+                j = kat.get(f"/api/material/produkte/{pid}").json["produkt"]["journal"]
+                return sorted((e["action"], tuple((e["nachher"] or {}).get("produkte") or ())) for e in j
+                              if e["entity"] == "ki_lauf")
+            beginn = [("recherche_beendet", ()), ("recherche_gestartet", ())]
+            assert ki_journal(pid1) == beginn + [("recherche_nachgeladen", (pid1,)),
+                                                 ("recherche_uebernommen", (pid1,))], ki_journal(pid1)
+            assert ki_journal(pid2) == beginn + [("recherche_uebernommen", (pid2,))], ki_journal(pid2)
+            assert ki_journal(fremd) == []
+            # … aus dem Journal, nicht aus dem Lauf: auch mit geleertem Lauf und nach der Löschung des Kontos.
+            with app.app_context():
+                ki.leeren(lid)
+            assert ki_journal(pid2) == beginn + [("recherche_uebernommen", (pid2,))]
+            assert k["adm"].delete(f"/api/admin/users/{uid2}", headers=H).status_code == 200
+            assert ki_journal(pid1)[-1] == ("recherche_uebernommen", (pid1,)) and len(ki_journal(pid1)) == 4
+            assert not [e for e in k["fuehrung"].get(f"/api/material/produkte/{pid1}").json["produkt"]["journal"]
+                        if e["entity"] == "ki_lauf"]
+            # O1: PR-2 gelöscht, ein neues Produkt mit derselben Kennung (eine Sekunde später) zeigt keine der alten.
+            assert kat.delete(f"/api/material/produkte/{pid2}", headers=H).status_code == 200
+            time.sleep(1.1)
+            assert produkt_anlegen(kat, ids, "PR-2", description="neu") == pid2
+            assert ki_journal(pid2) == []
+
+            # AB1 mit einem eigenen Lauf der Material-Verwaltung (Ausführung 3 ist noch anlegbar): Nach der Frist der
+            # Dateien zeigt der Reiter ihn nicht mehr – schon bevor der Tageslauf die Dateien entfernt.
+            z2, _ = recherchieren(kat, app, Attrappe(antworter(server, ids["gurte"], {"geprueft": []})),
+                                  formular(ids["gurte"], article_no="PR-5"))
+            assert kat.get(BASIS).json["recherche"]["id"] == z2["id"]
+            with app.app_context():
+                db.execute("UPDATE ki_laeufe SET beendet_am = ? WHERE id = ?", ("2020-01-01T00:00:00+00:00", z2["id"]))
+            assert kat.get(BASIS).json["recherche"] is None
+            with app.app_context():
+                assert os.path.isdir(ki.ordner(z2["id"]))
+                recherche.aufraeumen()
+                assert not os.path.isdir(ki.ordner(z2["id"]))
+            # AB4: Ausführung 3 von Hand angelegt – jede Ausführung steht im Katalog; der fertige Lauf ist per Kennung
+            # lesbar, der Reiter zeigt den Start.
+            produkt_anlegen(kat, ids, "PR-9")
+            z3, _ = recherchieren(kat, app, Attrappe(antworter(server, ids["gurte"], {"geprueft": []})),
+                                  formular(ids["gurte"], article_no="PR-6"))
+            st = kat.get(f"{BASIS}/{z3['id']}").json["recherche"]
+            assert st["status"] == "fertig" and not [a for a in st["vorschlag"]["ausfuehrungen"] if a["anlegbar"]], st
+            assert kat.get(BASIS).json["recherche"] is None
+            # AB2: z3 hat z2 ersetzt – anhaengen an z2 lehnt ab und bucht ihn nicht als übernommen.
+            neu = produkt_anlegen(kat, ids, "PR-6")
+            r = kat.post(f"{BASIS}/{z2['id']}/anhaengen", json={"product_id": neu, "nr": 1}, headers=H)
+            assert r.status_code == 409 and "neuere Recherche" in r.json["error"], r.get_json()
+            with app.app_context():
+                assert ki.zeile(z2["id"])["status"] == "fertig"
+                assert not db.query("SELECT 1 FROM mat_audit WHERE entity = 'ki_lauf' AND entity_id = ? AND action = "
+                                    "'recherche_uebernommen'", (z2["id"],), one=True)
+            # AB2 an einer Meldung: ein neuerer Lauf derselben Meldung ersetzt den alten.
+            mid = melden(k, gid, article_no="PR-7")
+            meldungslaeufe = []
+            for _ in range(2):
+                alt = einsetzen(Attrappe(antworter(server, ids["gurte"], {"geprueft": []})))
+                try:
+                    assert kat.post(f"/api/material/meldungen/{mid}/recherche", json={"domains": ["hersteller.test"]},
+                                    headers=H).status_code == 202
+                    meldungslaeufe.append(warten(mid, app))
+                finally:
+                    ki.CLIENT = alt
+            erster, zweiter = meldungslaeufe
+            assert zweiter["id"] > erster["id"] and erster["status"] == "fertig"
+            r = kat.post(f"/api/material/meldungen/{mid}/produkt", headers=H, json={
+                "category_id": ids["gurte"], "manufacturer": "Hersteller", "model": "Rettungsgurt Probe",
+                "article_no": "PR-7", "material_kind": "textil", "lifetime_years": 10, "antwort": ""})
+            assert r.status_code == 201, r.get_json()
+            r = kat.post(f"{BASIS}/{erster['id']}/anhaengen", json={"product_id": r.json["produkt"]["id"], "nr": 1},
+                         headers=H)
+            assert r.status_code == 409 and "neuere Recherche" in r.json["error"], r.get_json()
+            with app.app_context():
+                assert ki.zeile(erster["id"])["status"] == "fertig"
+        finally:
+            mails_zurueck(alt_mail)
+            netz_zurueck(alt_netz)
+            server.stop()
+    print("Nachbesserung: Anhängen, Journal, Start statt Vorschlag bestanden.")
+
+
 # --- Aufräumen, Kontolöschung, tote Läufe ---------------------------------------------------------------------------
 
 def test_aufraeumen_konto_tote():
     """Läufe ohne Meldung behalten ihre Dateien bis zur Frist (30 Tage nach dem Ende); vorher weg bei einem neueren
-    eigenen Lauf, bei „verworfen“ und ohne Konto. Meldungsläufe wie bisher. Kontolöschung leert die eigenen Läufe ohne
-    Meldung; ein toter Lauf ohne Meldung trägt „Recherche beendet“ (entity „ki_lauf“). JOURNAL_BLEIBT kennt „ki_lauf“."""
-    from app import db, ki
+    eigenen Lauf, bei „verworfen“ und ohne Konto. Meldungsläufe wie bisher. Kontolöschung (C6 A, Nachbesserung S3):
+    Eingabe und Vorschlag der eigenen Läufe ohne Meldung bleiben, der Name wird „(gelöschtes Konto)“, die Dateien gehen
+    erst nach dem COMMIT, ein laufender Lauf bricht ab – scheitert die Löschung, bleibt alles stehen. Ein toter Lauf
+    ohne Meldung trägt „Recherche beendet“ (entity „ki_lauf“). JOURNAL_BLEIBT kennt „ki_lauf“."""
+    from app import db, ki, start
     from app.material.services import bestand_leeren, recherche
+    alt_puls = ki.PULS_SEK
+    ki.PULS_SEK = 0.05
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["ANTHROPIC_API_KEY"] = SCHLUESSEL
         app, k = umgebung(os.path.join(tmp, "daten"))
-        _, uid2 = neues_konto(app, "katalog2@example.org", "lesen", rechte={"material": 3})
+        zweite, uid2 = neues_konto(app, "katalog2@example.org", "lesen", rechte={"material": 3})
         with app.app_context():
             uid1 = db.query("SELECT id FROM users WHERE email = 'katalog@example.org'", one=True)["id"]
             alt = "2020-01-01T00:00:00+00:00"
@@ -586,12 +737,56 @@ def test_aufraeumen_konto_tote():
             assert recherche.je_meldung([mid])[mid]["id"] == offen
         r = k["katalog"].get("/api/material/meldungen")
         assert r.status_code == 200 and [m["recherche"]["id"] for m in r.json["meldungen"]] == [offen], r.json
-        # Kontolöschung: die eigenen Läufe ohne Meldung verlieren Inhalt und Dateien, Meldungsläufe nur den Namen.
-        assert k["adm"].delete(f"/api/admin/users/{uid2}", headers=H).status_code == 200
+        # Kontolöschung mit einem laufenden Lauf ohne Meldung des Kontos (hängt, bis er abgebrochen wird).
+        strom = _Strom(nachricht([text("nie")]), haengen=True)
+        alt_client = einsetzen(Attrappe(lambda anfrage, nr: strom))
+        try:
+            r = zweite.post(BASIS, json=formular(), headers=H)
+            assert r.status_code == 202, r.get_json()
+            laeuft = r.json["recherche"]["id"]
+            with app.app_context():
+                # Der Start hat die Dateien der älteren eigenen Läufe entfernt – ein fertiger mit Ordner danach.
+                fertig2 = lauf(uid2)
+                vorher = {n: dict(ki.zeile(n)) for n in (fertig2, laeuft)}
+            # Scheitert die Löschung (künstlich, nach dem Kennzeichen), bleibt alles: Konto, Zeilen, Ordner, der Lauf.
+            alt_vergessen = start.konto_vergessen
+
+            def scheitern(uid):
+                raise RuntimeError("Probe: Löschung scheitert")
+            start.konto_vergessen = scheitern
+            try:
+                try:
+                    r = k["adm"].delete(f"/api/admin/users/{uid2}", headers=H)
+                    assert r.status_code == 500, r.status_code
+                except RuntimeError:
+                    pass
+            finally:
+                start.konto_vergessen = alt_vergessen
+            with app.app_context():
+                assert db.query("SELECT 1 FROM users WHERE id = ?", (uid2,), one=True)
+                for n in (fertig2, laeuft):
+                    assert dict(ki.zeile(n)) | {"lebenszeichen_am": None, "status": None} \
+                        == vorher[n] | {"lebenszeichen_am": None, "status": None}, n
+                assert os.path.isdir(ki.ordner(fertig2)) and os.path.isdir(ki.ordner(laeuft))
+                assert ki.zeile(laeuft)["status"] in ki.LAUFEND and not ki.zeile(laeuft)["abbrechen"]
+            assert not strom.geschlossen.wait(0.3)            # der Lauf läuft weiter
+            # Die echte Löschung: Eingabe und Vorschlag bleiben (ohne Personendaten), Name „(gelöschtes Konto)“,
+            # Kennung NULL, Ordner sofort weg; der laufende bricht ab – „Recherche beendet“ unter dem neuen Namen.
+            assert k["adm"].delete(f"/api/admin/users/{uid2}", headers=H).status_code == 200
+            lauf_ende(app, laeuft)
+        finally:
+            ki.CLIENT = alt_client
         with app.app_context():
-            z = ki.zeile(eigen2)
-            assert z["eingabe_json"] == "{}" and z["ergebnis_json"] is None and z["gestartet_von"] is None \
-                and z["gestartet_von_name"] == ki.GELOESCHT and not os.path.isdir(ki.ordner(eigen2)), dict(z)
+            for n in (fertig2, laeuft):
+                z = ki.zeile(n)
+                assert z["eingabe_json"] == vorher[n]["eingabe_json"] != "{}" and z["gestartet_von"] is None \
+                    and z["gestartet_von_name"] == ki.GELOESCHT and not os.path.isdir(ki.ordner(n)), dict(z)
+            assert json.loads(ki.zeile(fertig2)["ergebnis_json"]) == json.loads(vorher[fertig2]["ergebnis_json"])
+            assert ki.zeile(laeuft)["status"] == "abgebrochen"
+            e = db.query("SELECT user_name, after_json FROM mat_audit WHERE entity = 'ki_lauf' AND entity_id = ? AND "
+                         "action = 'recherche_beendet'", (laeuft,))
+            assert len(e) == 1 and e[0]["user_name"] == ki.GELOESCHT \
+                and json.loads(e[0]["after_json"])["status"] == "abgebrochen", [dict(x) for x in e]
             assert ki.zeile(offen)["eingabe_json"] != "{}"
             # Ein toter Lauf ohne Meldung: „Recherche beendet“ unter entity „ki_lauf“ im Namen dessen, der startete.
             tot = db.execute("INSERT INTO ki_laeufe (art, bezug, status, eingabe_json, gestartet_von, "
@@ -602,6 +797,7 @@ def test_aufraeumen_konto_tote():
             assert [x["action"] for x in e] == ["recherche_beendet"] and e[0]["user_name"] == "Katalog Probe" \
                 and json.loads(e[0]["after_json"])["grund"] == ki.TOT_TEXT, [dict(x) for x in e]
         assert "ki_lauf" in bestand_leeren.JOURNAL_BLEIBT
+    ki.PULS_SEK = alt_puls
     print("Aufräumen, Kontolöschung und tote Läufe bestanden.")
 
 
@@ -741,6 +937,7 @@ if __name__ == "__main__":
     test_eigener_lauf_und_verwerfen()
     test_anhaengen_ohne_meldung()
     test_anhaengen_aus_meldung()
+    test_nachbesserung_anhaengen()
     test_aufraeumen_konto_tote()
     test_rechte()
     test_oberflaeche_statisch()

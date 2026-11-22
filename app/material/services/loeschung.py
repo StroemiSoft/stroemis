@@ -24,12 +24,12 @@ ab, bleibt das Konto samt allem stehen:
   KI-Läufe           (Recherche per Claude API an Produktmeldungen und im Produktdialog, ki_laeufe – app/ki.konto_loeschen,
                      aufgerufen von api_admin.delete_user) Name dessen, der gestartet hat, „(gelöschtes Konto)“, die
                      Kennung setzt die Datenbank auf NULL; endet ein laufender Lauf danach, steht „Recherche beendet“
-                     ohne Kennung im Journal. Läufe ohne Meldung (Reiter im Produktdialog) des Kontos verlieren davor
-                     Eingabe, Vorschlag und Dateien (recherche.konto_geloescht; ein laufender bricht ab), die Zeile
-                     bleibt fürs Kontingent. Unabhängig vom Konto: Löscht der Melder die Meldung, werden Eingabe und
-                     Vorschlag geleert und die Dateien entfernt (die Zeile bleibt fürs Kontingent); die Dateien eines
-                     übernommenen Vorschlags gehen 30 Tage nach dem Erledigen, die eines Laufs ohne Meldung 30 Tage
-                     nach seinem Ende (Tageslauf)
+                     ohne Kennung im Journal. Läufe ohne Meldung (Reiter im Produktdialog) des Kontos behalten
+                     Eingabe und Vorschlag (ohne Personendaten, C6 A), nur ihre Dateien gehen nach dem COMMIT sofort
+                     (recherche.konto_geloescht / konto_geloescht_nachher; ein laufender bricht ab). Unabhängig vom
+                     Konto: Löscht der Melder die Meldung, werden Eingabe und Vorschlag geleert und die Dateien
+                     entfernt (die Zeile bleibt fürs Kontingent); die Dateien eines übernommenen Vorschlags gehen 30
+                     Tage nach dem Erledigen, die eines Laufs ohne Meldung 30 Tage nach seinem Ende (Tageslauf)
   Bestandsimporte    Name dessen, der importiert hat (mat_import), und dessen, der eine Zeile der Nacharbeit erledigt
                      hat (mat_import_row), „(gelöschtes Konto)“ – Arbeitsdaten; der Nachweis steht im Journal
   Suchprotokoll      Name „(gelöschtes Konto)“ (nach zwölf Monaten ohnehin weg)

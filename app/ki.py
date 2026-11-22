@@ -388,13 +388,27 @@ def starten(art, bezug, eingabe, arbeit, effort="", beendet=None, mit_ordner=Fal
 def abbrechen(lauf_id):
     """Das Abbruch-Kennzeichen setzen (nur an einem laufenden Lauf). Läuft er in diesem Arbeitsprozess, erfährt er es
     sofort, sonst mit dem nächsten Lebenszeichen. Liefert, ob etwas zu tun war."""
-    n = db.execute_zeilen(f"UPDATE ki_laeufe SET abbrechen = 1 WHERE id = ? AND status IN ({_in(LAUFEND)})",
-                          (lauf_id,))
+    n = abbruch_kennzeichnen(lauf_id)
+    if n:
+        abbruch_melden(lauf_id)
+    return n
+
+
+def abbruch_kennzeichnen(lauf_id):
+    """Nur das Abbruch-Kennzeichen (nur an einem laufenden Lauf) – auch in der Transaktion eines Aufrufers, der den Lauf
+    erst nach seinem COMMIT mit abbruch_melden weckt (scheitert die Transaktion, läuft er weiter). Liefert, ob etwas zu
+    tun war."""
+    return bool(db.execute_zeilen(f"UPDATE ki_laeufe SET abbrechen = 1 WHERE id = ? AND status IN ({_in(LAUFEND)})",
+                                  (lauf_id,)))
+
+
+def abbruch_melden(lauf_id):
+    """Nach dem Kennzeichen: Läuft der Lauf in diesem Arbeitsprozess, erfährt er es sofort, sonst mit dem nächsten
+    Lebenszeichen (_puls)."""
     with _LAEUFER_SPERRE:
         lauf = _LAEUFER.get(lauf_id)
-    if n and lauf is not None:
+    if lauf is not None:
         lauf.abbrechen_intern("Abgebrochen.")
-    return bool(n)
 
 
 def leeren(lauf_id):

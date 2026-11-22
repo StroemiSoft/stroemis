@@ -101,6 +101,7 @@ AN_ANTHROPIC_KATALOG = {"titel": "An Anthropic (Claude API) gehen:",
                         "nie": "Nie: Namen, E-Mail-Adressen, Ordner, Gliederung."}
 BEZUG_KATALOG = "mat_katalog"         # alle Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog)
 KEIN_KATALOG_LAUF = "Diese Recherche gibt es nicht."
+ERSETZT = "Zu diesem Vorschlag gibt es eine neuere Recherche – seine Dateien hängen nicht mehr an."
 
 
 def bezug(mid):
@@ -1573,14 +1574,41 @@ def eigener(user=None):
                     (ART, BEZUG_KATALOG, u["id"]), one=True)
 
 
+def _frist():
+    """Grenze der Aufbewahrung (UTC wie db.now): Was davor endete bzw. erledigt wurde, hat keine Dateien mehr."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=AUFHEBEN_TAGE)).replace(microsecond=0).isoformat()
+
+
+def _abgelaufen(z, frist=None):
+    """Ein fertiger oder übernommener Lauf, dessen Dateien die Frist ohne Meldung überschritten haben – der Tageslauf
+    entfernt sie (aufraeumen), der Reiter zeigt ihn nicht mehr (katalog_lesen). Dieselbe Zeit an beiden Stellen; nach
+    der Zeit, nicht nach dem Ordner: Der Tageslauf kommt nur einmal am Tag (Prüfung Ablauf, B1)."""
+    return z["status"] in ("fertig", "uebernommen") and (z["beendet_am"] or "") < (frist or _frist())
+
+
+def _neuerer(z):
+    """Gibt es zu diesem Lauf einen neueren, der ihn ersetzt – ohne Meldung einen eigenen ohne Meldung (ohne Konto
+    keinen), an einer Meldung einen neueren derselben Meldung? Dessen Start hat die Dateien dieses Laufs entfernt."""
+    if z["bezug"] == BEZUG_KATALOG:
+        return z["gestartet_von"] is not None and bool(db.query(
+            "SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ? AND id > ? LIMIT 1",
+            (ART, BEZUG_KATALOG, z["gestartet_von"], z["id"]), one=True))
+    return bool(db.query("SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND id > ? LIMIT 1",
+                         (ART, z["bezug"], z["id"]), one=True))
+
+
 def katalog_lesen(hersteller=""):
-    """GET /recherche: der eigene Lauf ohne Meldung (voll) – nicht, wenn er verworfen ist oder übernommen ohne weitere
-    anlegbare Ausführung (dann zeigt der Reiter den Start) –, Möglichkeit und die Daten des Starts (nur mit Schlüssel;
-    die Domains zum Hersteller aus dem Formular)."""
+    """GET /recherche: der eigene Lauf ohne Meldung (voll), Möglichkeit und die Daten des Starts (nur mit Schlüssel;
+    die Domains zum Hersteller aus dem Formular). Den Lauf zeigt der Reiter nicht mehr (dann steht dort der Start), wenn
+    er verworfen ist, wenn seine Dateien nach AUFHEBEN_TAGE abgelaufen sind (C5 A) oder wenn keine seiner Ausführungen
+    mehr anlegbar ist, gleich in welchem Status (3.4). Ein Vorschlag ganz ohne Ausführung bleibt stehen, bis er
+    verworfen, ersetzt oder abgelaufen ist."""
     ki.tote_aufraeumen()
-    r = status_json(eigener(), voll=True)
-    if r and (r["verworfen"] or (r["status"] == "uebernommen" and not any(
-            a["anlegbar"] for a in (r["vorschlag"] or {}).get("ausfuehrungen", [])))):
+    z = eigener()
+    r = status_json(z, voll=True)
+    if r and (r["verworfen"] or _abgelaufen(z) or (r["vorschlag"] and r["vorschlag"]["ausfuehrungen"] and not any(
+            a["anlegbar"] for a in r["vorschlag"]["ausfuehrungen"]))):
         r = None
     return {"recherche": r, "moeglich": moeglich(),
             "start": katalog_startdaten(hersteller) if ki.verfuegbar() else None}
@@ -1752,9 +1780,13 @@ def anhaengen(lid, d):
     Läufe mit und ohne Meldung (3.4): die gewählten Dateien der Ausführung nr an das eben angelegte Produkt. Geprüft wird
     wie bei der Übernahme an der Meldung (nur angebotene Dateien dieser Ausführung, ihr Bild), dazu: Das Produkt
     entstand nach dem Lauf (G3 A – nie an ein bestehendes), an einer Meldung ist es das Produkt, mit dem sie erledigt
-    wurde. Trägt das Produkt in uebernahme.produkte ein (je Produkt einmal, mit der Zeit SEINER Übernahme), setzt den
-    Lauf auf „übernommen“ und schreibt „Recherche übernommen“ ins Journal – auch ganz ohne Dateien. Wiederholbar: Ein
-    zweiter Aufruf hängt nur an, was fehlt (_anhaengen). → {anhaengen, recherche}."""
+    wurde. Abgelehnt (409): ein Lauf, den ein neuerer ersetzt hat (dessen Start hat die Dateien entfernt), eine
+    Ausführung, die schon als anderes Produkt im Katalog steht, und eine andere Ausführung als die, aus der das Produkt
+    schon angelegt wurde (ein Produkt hat genau eine). Trägt das Produkt in uebernahme.produkte ein (je Produkt einmal,
+    mit der Zeit SEINER Übernahme), setzt den Lauf auf „übernommen“ und schreibt „Recherche übernommen“ ins Journal –
+    auch ganz ohne Dateien. Wiederholbar: Ein zweiter Aufruf hängt nur an, was fehlt (_anhaengen); wählt er Dateien
+    dazu, steht „Recherche nachgeladen“ mit genau diesen im Journal (der erste Eintrag ist unveränderlich).
+    → {anhaengen, recherche}."""
     z = ki.zeile(lid)
     if not z or z["art"] != ART or (z["bezug"] != BEZUG_KATALOG and not _mid(z["bezug"])):
         raise Abgelehnt(KEIN_KATALOG_LAUF, 404)
@@ -1764,16 +1796,20 @@ def anhaengen(lid, d):
         raise Abgelehnt("Es gibt keinen fertigen Vorschlag zum Übernehmen.", 409)
     if erg.get("verworfen"):
         raise Abgelehnt("Dieser Vorschlag ist verworfen.", 409)
+    # Ein neuerer Lauf hat diesen ersetzt und beim Start seine Dateien entfernt – er gilt nicht als übernommen (AB2).
+    if _neuerer(z):
+        raise Abgelehnt(ERSETZT, 409)
     je_nr = {a["nr"]: a for a in v["ausfuehrungen"]}
     nr = d.get("nr")
-    if isinstance(nr, bool) or nr not in je_nr:
+    # Nur ganze Zahlen (nicht True, nicht 1.0 – die stünde sonst so in der Übernahme und im Journal).
+    if not _ganz(nr) or nr not in je_nr:
         raise Abgelehnt("Unbekannte Ausführung im Vorschlag.")
     a = je_nr[nr]
     angeboten = {f["n"]: f for f in v["dateien"] if f.get("anbieten")}
     dateien = d.get("dateien") or []
     # Wie im Reiter: Dateien dieser Ausführung – laut Prüfung bzw. Recherche ihr zugeordnet oder keiner bestimmten.
     if not isinstance(dateien, list) or any(
-            isinstance(x, bool) or x not in angeboten or angeboten[x]["art"] == "produktbild"
+            not _ganz(x) or x not in angeboten or angeboten[x]["art"] == "produktbild"
             or (angeboten[x]["gehoert_zu"] and nr not in angeboten[x]["gehoert_zu"]) for x in dateien):
         raise Abgelehnt(f"Ausführung {nr}: unbekannte oder nicht angebotene Datei gewählt.")
     bild = wahr(d, "bild", "Bild übernehmen")
@@ -1791,12 +1827,19 @@ def anhaengen(lid, d):
         m = db.query("SELECT status, product_id FROM mat_product_request WHERE id = ?", (mid,), one=True)
         if not m or m["status"] != "eingepflegt" or m["product_id"] != pid:
             raise Abgelehnt("Die Meldung dieser Recherche ist nicht mit diesem Produkt erledigt.", 409)
+    # Die Ausführung steht schon als anderes Produkt im Katalog: ihre Dateien gehören zu jenem (Prüfung Ablauf).
+    da = _im_katalog(v["gemeinsam"]["manufacturer"]["wert"], v["gemeinsam"]["model"]["wert"],
+                     a["felder"]["article_no"]["wert"])
+    if da and da["id"] != pid:
+        raise Abgelehnt(f"Ausführung {nr} steht schon im Katalog als „{da['name']}“.", 409)
     jetzt = db.now()
     with db.transaction(sofort=True):
         z = ki.zeile(lid)
         erg = ki.json_lesen(z["ergebnis_json"], {}) or {}
         if z["status"] not in ("fertig", "uebernommen") or erg.get("verworfen"):
             raise Abgelehnt("Der Vorschlag wurde zwischenzeitlich geändert. Bitte neu laden.", 409)
+        if _neuerer(z):
+            raise Abgelehnt(ERSETZT, 409)
         ue = erg.get("uebernahme") or {"produkte": [], "am": jetzt}
         eintrag = next((e for e in ue["produkte"] if e["product_id"] == pid), None)
         # Ein Eintrag zu einem Produkt, das erst nach ihm entstand, meint ein gelöschtes mit wieder vergebener Kennung
@@ -1804,12 +1847,19 @@ def anhaengen(lid, d):
         if eintrag and p["created_at"] > (eintrag.get("am") or ue.get("am") or ""):
             ue["produkte"].remove(eintrag)
             eintrag = None
+        # Ein Produkt stammt aus genau einer Ausführung: Dateien einer anderen gehören nicht dazu.
+        if eintrag and eintrag["nr"] != nr:
+            raise Abgelehnt(f"Dieses Produkt wurde aus Ausführung {eintrag['nr']} angelegt.", 409)
         neu = eintrag is None
         if neu:
             eintrag = {"nr": nr, "product_id": pid, "dateien": sorted(set(dateien)), "bild": a["bild"] if bild else None,
                        "am": jetzt}
             ue["produkte"].append(eintrag)
+            dazu = set(eintrag["dateien"]) | ({eintrag["bild"]} if eintrag["bild"] else set())
         else:
+            dazu = set(dateien) - set(eintrag["dateien"])
+            if bild and not eintrag.get("bild"):
+                dazu.add(a["bild"])
             eintrag["dateien"] = sorted(set(eintrag["dateien"]) | set(dateien))
             eintrag["bild"] = eintrag.get("bild") or (a["bild"] if bild else None)
         if mid:
@@ -1817,15 +1867,23 @@ def anhaengen(lid, d):
         erg["uebernahme"] = ue
         db.execute("UPDATE ki_laeufe SET status = 'uebernommen', ergebnis_json = ? WHERE id = ?",
                    (json.dumps(erg, ensure_ascii=False), lid))
-        if neu:
+        # Journal: beim ersten Aufruf je Produkt „Recherche übernommen“, kommen später Dateien dazu, „Recherche
+        # nachgeladen“ mit genau diesen – eine bloße Wiederholung (Teilfehler) schreibt nichts.
+        if neu or dazu:
             je_n = {f["n"]: f for f in v["dateien"]}
-            gewaehlt = sorted(set(eintrag["dateien"]) | ({eintrag["bild"]} if eintrag["bild"] else set()))
-            journal.eintragen(*(("recherche", mid) if mid else ("ki_lauf", lid)), "recherche_uebernommen", None, {
-                "ki_lauf": lid, "produkte": [pid], "ausfuehrung": nr, "felder": sorted(set(felder)),
-                "dateien": [f"{DOKUMENT_NAMEN.get(je_n[n]['art'], je_n[n]['art'])}: {je_n[n]['sha256']}"
-                            for n in gewaehlt]})
+            journal.eintragen(*(("recherche", mid) if mid else ("ki_lauf", lid)),
+                              "recherche_uebernommen" if neu else "recherche_nachgeladen", None, {
+                                  "ki_lauf": lid, "produkte": [pid], "ausfuehrung": nr,
+                                  **({"felder": sorted(set(felder))} if neu else {}),
+                                  "dateien": [f"{DOKUMENT_NAMEN.get(je_n[n]['art'], je_n[n]['art'])}: "
+                                              f"{je_n[n]['sha256']}" for n in sorted(dazu)]})
     return {"anhaengen": _anhaengen(lid, [eintrag], v, eintrag.get("am") or ue.get("am") or jetzt),
             "recherche": status_json(ki.zeile(lid))}
+
+
+def _ganz(x):
+    """Eine ganze Zahl aus JSON – nicht True/False (bool ist in Python eine Zahl) und nicht 1.0."""
+    return isinstance(x, int) and not isinstance(x, bool)
 
 
 def _anhaengen(lauf_id, produkte, v, am):
@@ -1911,11 +1969,24 @@ def meldung_erledigt(mid):
 
 
 def konto_geloescht(uid):
-    """Vor dem Löschen eines Kontos (api_admin.delete_user, vor ki.konto_loeschen): Seine Läufe ohne Meldung verlieren
-    Inhalt und Dateien (ki.leeren; ein laufender bricht ab), die Zeilen bleiben fürs Kontingent (C5 A)."""
-    for r in db.query("SELECT id FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ?",
-                      (ART, BEZUG_KATALOG, uid)):
-        ki.leeren(r["id"])
+    """In der Transaktion von api_admin.delete_user (vor ki.konto_loeschen): Ein laufender Lauf ohne Meldung dieses
+    Kontos bekommt das Abbruch-Kennzeichen. Eingabe und Vorschlag bleiben stehen (C6 A – sie enthalten keine
+    Personendaten; den Namen macht ki.konto_loeschen zu „(gelöschtes Konto)“, gestartet_von setzt die Datenbank auf
+    NULL). Liefert die Kennungen seiner Läufe ohne Meldung – ihre Ordner entfernt erst konto_geloescht_nachher nach dem
+    COMMIT: Scheitert die Löschung, bleibt alles, wie es war (Muster dev-zuruecksetzen)."""
+    ids = [r["id"] for r in db.query("SELECT id FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ?",
+                                     (ART, BEZUG_KATALOG, uid))]
+    for lid in ids:
+        ki.abbruch_kennzeichnen(lid)
+    return ids
+
+
+def konto_geloescht_nachher(ids):
+    """Nach dem COMMIT der Kontolöschung: die Dateien der Läufe ohne Meldung des Kontos sofort weg (C5 A), ein Lauf in
+    diesem Arbeitsprozess erfährt den Abbruch sofort (in einem anderen mit dem nächsten Lebenszeichen)."""
+    for lid in ids:
+        ki.abbruch_melden(lid)
+        ki.ordner_entfernen(lid)
 
 
 def aufraeumen():
@@ -1928,8 +1999,7 @@ def aufraeumen():
         basis = os.path.join(current_app.config["DATA_DIR"], ki.ORDNER)
         if not os.path.isdir(basis):
             return
-        from datetime import datetime, timedelta, timezone
-        frist = (datetime.now(timezone.utc) - timedelta(days=AUFHEBEN_TAGE)).replace(microsecond=0).isoformat()
+        frist = _frist()
         for name in os.listdir(basis):
             if not name.isdigit():
                 continue
@@ -1937,18 +2007,13 @@ def aufraeumen():
             if not z or z["art"] != ART or z["status"] not in ("fertig", "uebernommen"):
                 continue
             if z["bezug"] == BEZUG_KATALOG:
-                neuer = z["gestartet_von"] is not None and db.query(
-                    "SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ? AND id > ? LIMIT 1",
-                    (ART, BEZUG_KATALOG, z["gestartet_von"], z["id"]), one=True)
-                if (z["gestartet_von"] is None or neuer or (z["beendet_am"] or "") < frist
+                if (z["gestartet_von"] is None or _neuerer(z) or _abgelaufen(z, frist)
                         or (ki.json_lesen(z["ergebnis_json"], {}) or {}).get("verworfen")):
                     ki.ordner_entfernen(z["id"])
                 continue
             mid = _mid(z["bezug"])
             m = db.query("SELECT status, resolved_at FROM mat_product_request WHERE id = ?", (mid,), one=True)
-            neuer = db.query("SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND id > ? LIMIT 1",
-                             (ART, z["bezug"], z["id"]), one=True)
-            if not m or neuer or (m["status"] != "offen" and (m["resolved_at"] or "") < frist):
+            if not m or _neuerer(z) or (m["status"] != "offen" and (m["resolved_at"] or "") < frist):
                 ki.ordner_entfernen(z["id"])
     except Exception as exc:                        # noqa: BLE001 – der Tageslauf soll daran nicht scheitern
         current_app.logger.warning("Recherche: Aufräumen gescheitert: %s", exc)

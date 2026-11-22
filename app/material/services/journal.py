@@ -176,14 +176,24 @@ def fuer_produkt(pid, user=None, meldungen=True):
         # Die Recherche per Claude API zur Meldung (entity „recherche“) nur für die Material-Verwaltung (B2 A).
         if ist_material_verwaltung(user):
             paare += [("recherche", m) for m in meldungen_ids]
-            # Läufe ohne Meldung, deren Übernahme das Produkt nennt – nur, wenn das Produkt schon zur Zeit dieser
-            # Übernahme bestand (eine nach dem Löschen wieder vergebene Kennung meint ein anderes).
-            paare += [("ki_lauf", r["id"]) for r in db.query(
-                "SELECT k.id FROM ki_laeufe k, mat_product p WHERE p.id = ? AND k.art = 'mat_recherche' "
-                "AND k.bezug = 'mat_katalog' AND EXISTS (SELECT 1 FROM json_each(k.ergebnis_json, "
-                "'$.uebernahme.produkte') e WHERE json_extract(e.value, '$.product_id') = p.id "
-                "AND json_extract(e.value, '$.am') >= p.created_at) ORDER BY k.id", (pid,))]
+            # Läufe ohne Meldung, aus denen das Produkt entstand – bestimmt aus dem unveränderlichen Journal („Recherche
+            # übernommen“ nennt das Produkt), nicht aus dem Lauf: dessen Inhalt kann sich ändern. Nur Einträge seit dem
+            # Anlegen des Produkts – eine nach dem Löschen wieder vergebene Kennung meint ein anderes (O1).
+            p = db.query("SELECT created_at FROM mat_product WHERE id = ?", (pid,), one=True)
+            laeufe = [r["entity_id"] for r in db.query(
+                "SELECT DISTINCT entity_id FROM mat_audit a WHERE entity = 'ki_lauf' AND action = 'recherche_uebernommen' "
+                "AND created_at >= ? AND EXISTS (SELECT 1 FROM json_each(a.after_json, '$.produkte') WHERE value = ?) "
+                "ORDER BY entity_id", (p["created_at"] if p else "9999", pid))]
+            if laeufe:
+                # Von diesen Läufen „gestartet“ und „beendet“, an Übernahmen aber nur die, die DIESES Produkt nennen.
+                return [e for e in lesen(paare + [("ki_lauf", lid) for lid in laeufe])
+                        if e["entity"] != "ki_lauf" or e["action"] not in KI_UEBERNAHMEN
+                        or (pid in (e["nachher"] or {}).get("produkte", []) and e["created_at"] >= p["created_at"])]
     return lesen(paare)
+
+
+# Einträge eines Laufs ohne Meldung, die je Produkt gelten (recherche.anhaengen).
+KI_UEBERNAHMEN = ("recherche_uebernommen", "recherche_nachgeladen")
 
 
 # Einträge am Artikel, die das Produkt wechseln (Produkt im Dialog „Bearbeiten“ bis zur ersten Prüfung, per Antrag danach).
