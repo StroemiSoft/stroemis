@@ -1,7 +1,8 @@
 """Läufe über die Claude API – der gemeinsame Baustein aller Module (Entscheidung des Nutzers vom 21.11.2026).
 
-Zuerst nutzt ihn die Recherche an „Produkt melden“ der Materialablage (material/services/recherche.py), später der
-Artikelentwurf der Strömipedia. Ein Modul bringt seine Anweisung, seine Werkzeuge und seine Prüfungen selbst mit; hier
+Zuerst nutzt ihn die Recherche an „Produkt melden“ der Materialablage (material/services/recherche.py; Bezug
+„mat_meldung:<id>“, seit dem 22.11.2026 auch „mat_katalog“ für Läufe aus dem Produktdialog ohne Meldung – wem so ein
+Lauf gehört, sagt gestartet_von), später der Artikelentwurf der Strömipedia. Ein Modul bringt seine Anweisung, seine Werkzeuge und seine Prüfungen selbst mit; hier
 steht, was für alle gleich ist:
 
   - Client-Fabrik CLIENT (Tests setzen eine Attrappe ein) und verfuegbar(): Die Funktion gibt es nur mit einem

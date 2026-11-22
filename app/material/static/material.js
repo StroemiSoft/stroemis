@@ -412,6 +412,8 @@
     // Recherche per Claude API an einer Produktmeldung (21.11.2026, entity „recherche“)
     domains: "Herstellerseiten", bemerkung_mit: "Bemerkung mitgeschickt", ki_modell: "Modell (Claude API)",
     effort: "Aufwand", ki_lauf: "Recherche Nr.", belegt: "vorbelegte Felder", produkte: "Produkte",
+    // Recherche im Produktdialog (22.11.2026, „Recherche übernommen“ nach „Anlegen“)
+    ausfuehrung: "Ausführung", felder: "übernommene Felder",
   };
   // Die Beschriftung eines Feldes in einem Journaleintrag – wie beschriftung.feld_name: „description“ ist am Produkt der
   // kurze Zusatz hinter dem Namen und heißt dort seit dem Wunsch vom 18.10.2026 „Bemerkung“; an Ordnern und in den
@@ -466,7 +468,9 @@
   const RECHT = { lesen: "lesen", pruefen: "prüfen", verwalten: "verwalten" };
   const ENTITAET = { item: "Artikel", product: "Produkt", document: "Dokument", form: "Formular", folder: "Ordner",
                      category: "Kategorie", user: "Konto", inspection: "Prüfung", round: "Durchgang", request: "Produktmeldung",
-                     formular: "Prüfformular", recherche: "Recherche (Claude API)" };
+                     formular: "Prüfformular", recherche: "Recherche (Claude API)",
+                     // Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog, 22.11.2026) – Kennung des Laufs
+                     ki_lauf: "Recherche (Claude API)" };
 
   /* Warum hier nicht geprüft werden kann – als HTML. obj: der Ordner, Artikel oder die Prüfung (mit „darf“); ohne obj
      gilt die Frage für das ganze Konto (Seite „Prüfungen“). Prüfen braucht seit Phase 2 dreierlei: das Häkchen

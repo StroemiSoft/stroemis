@@ -14,10 +14,24 @@ Antworten (Beispiele im Bericht zum Bau):
   GET    /api/material/meldungen/<id>/recherche/dateien/<n>  → die Datei
   POST   /api/material/meldungen/<id>/recherche/uebernehmen  {gemeinsam, ausfuehrungen, antwort} → 201
          {meldung, produkte, anhaengen, recherche}
-  POST   /api/material/meldungen/<id>/recherche/nachladen    → {meldung, produkte, anhaengen, recherche}"""
+  POST   /api/material/meldungen/<id>/recherche/nachladen    → {meldung, produkte, anhaengen, recherche}
+
+Seit dem 22.11.2026 der Reiter „Recherche“ im Produktdialog (entwurf_recherche_reiter_produkt.md): Läufe ohne Meldung
+(Bezug „mat_katalog“) liest, startet, bricht ab und verwirft er über die Kennung des Laufs; aus einer Meldung nimmt er
+deren Routen oben. Nach „Anlegen“ hängt anhaengen die gewählten Dateien an – für Läufe mit und ohne Meldung. Die
+Leserouten nach Kennung kennen nur Läufe ohne Meldung (sonst 404). Gleiches Recht wie oben (katalog_required): Jede
+Material-Verwaltung darf jeden Lauf über seine Kennung, nur „Verwerfen“ bleibt dem, der gestartet hat (403).
+  GET    /api/material/recherche?hersteller=…                → {recherche (eigener Lauf, voll) | null, moeglich, start}
+  POST   /api/material/recherche   {manufacturer, model, article_no, norm, category_id, description, domains}
+         → 202 {recherche, moeglich, hinweis}; 409 mit „produkt“, wenn es schon im Katalog steht
+  GET    /api/material/recherche/<lid>                       → {recherche (voll), moeglich}
+  POST   /api/material/recherche/<lid>/abbrechen             → {recherche}
+  GET    /api/material/recherche/<lid>/dateien/<n>           → die Datei
+  POST   /api/material/recherche/<lid>/anhaengen   {product_id, nr, dateien, bild, felder} → {anhaengen, recherche}
+  POST   /api/material/recherche/<lid>/verwerfen             → {ok}"""
 from functools import wraps
 
-from flask import jsonify, send_from_directory
+from flask import jsonify, request, send_from_directory
 
 from .. import ki
 from ..auth import json_body
@@ -66,7 +80,11 @@ def recherche_abbrechen(mid):
 @api.get("/meldungen/<int:mid>/recherche/dateien/<int:n>")
 @katalog_required
 def recherche_datei(mid, n):
-    ordner, name, mime = recherche.datei(mid, n)
+    return _datei(*recherche.datei(mid, n))
+
+
+def _datei(ordner, name, mime):
+    """Eine Datei eines Vorschlags – mit den Kopfzeilen eines Herstellerdokuments."""
     resp = send_from_directory(ordner, name, mimetype=mime, as_attachment=False, download_name=name, max_age=0)
     resp.cache_control.public = None
     resp.cache_control.private = True
@@ -89,3 +107,56 @@ def recherche_uebernehmen(mid):
 @katalog_required
 def recherche_nachladen(mid):
     return jsonify(recherche.nachladen(mid))
+
+
+# --- Reiter „Recherche“ im Produktdialog (22.11.2026) ---------------------------------------------------------------
+
+@api.get("/recherche")
+@katalog_required
+def recherche_eigene():
+    """Der eigene Lauf ohne Meldung; „hersteller“ (aus dem Formular) belegt die Domains des Starts vor."""
+    return jsonify(recherche.katalog_lesen(request.args.get("hersteller", "")[:120]))
+
+
+@api.post("/recherche")
+@katalog_required
+@_verfuegbar
+def recherche_katalog_starten():
+    """Start ohne Meldung → 202. 400 Feld, 409 im Katalog („produkt“) oder es läuft schon eine, 429 Kontingent."""
+    try:
+        z, hinweis = recherche.katalog_starten(json_body())
+    except recherche.ImKatalog as exc:
+        return jsonify(error=str(exc), produkt=exc.produkt), 409
+    return jsonify(recherche=recherche.status_json(z), moeglich=recherche.moeglich(), hinweis=hinweis), 202
+
+
+@api.get("/recherche/<int:lid>")
+@katalog_required
+def recherche_lauf(lid):
+    return jsonify(recherche.lauf_lesen(lid))
+
+
+@api.post("/recherche/<int:lid>/abbrechen")
+@katalog_required
+@_verfuegbar
+def recherche_lauf_abbrechen(lid):
+    return jsonify(recherche=recherche.status_json(recherche.lauf_abbrechen(lid)))
+
+
+@api.get("/recherche/<int:lid>/dateien/<int:n>")
+@katalog_required
+def recherche_lauf_datei(lid, n):
+    return _datei(*recherche.lauf_datei(lid, n))
+
+
+@api.post("/recherche/<int:lid>/anhaengen")
+@katalog_required
+def recherche_anhaengen(lid):
+    """Nach „Anlegen“ im Produktdialog: die gewählten Dateien an das neue Produkt (Läufe mit und ohne Meldung)."""
+    return jsonify(recherche.anhaengen(lid, json_body()))
+
+
+@api.post("/recherche/<int:lid>/verwerfen")
+@katalog_required
+def recherche_verwerfen(lid):
+    return jsonify(recherche.verwerfen(lid))
