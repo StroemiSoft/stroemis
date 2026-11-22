@@ -634,14 +634,18 @@ der API und bleibt erreichbar.
   zusammen. **Läufe ohne Meldung** tragen den Bezug `mat_katalog`; wem einer gehört, sagt `gestartet_von`. Der Reiter
   zeigt je Konto den jüngsten eigenen Lauf (andere Verwalter sehen nur den Sperrgrund „Es läuft schon eine Recherche zu
   „…“ (Name)“), auch nach dem Schließen des Dialogs – oben im Reiter „Produkt“ steht dann „Deine Recherche … läuft“ bzw.
-  „… ist fertig“. Ein neuer Start ersetzt ihn, „Verwerfen“ (nur wer gestartet hat) nimmt ihn samt Dateien weg; nicht
-  mehr gezeigt wird er auch, wenn keine Ausführung mehr anlegbar ist. „In die Felder übernehmen“ überschreibt die
+  „… ist fertig“. Ein neuer Start („Recherchieren lassen“, unter einem Vorschlag „Erneut recherchieren“) ersetzt ihn –
+  eine schon erfolgte Übernahme in die Felder verliert dann ihre Dateien, die Werte bleiben –, „Verwerfen“ (nur wer
+  gestartet hat) nimmt ihn samt Dateien weg; nicht mehr gezeigt wird er auch nach der Frist seiner Dateien (30 Tage)
+  und wenn keine Ausführung mehr anlegbar ist. „In die Felder übernehmen“ überschreibt die
   belegten Felder der gewählten Ausführung (Kategorie zuerst, deren Vorgaben, dann die Werte); „Anlegen“ legt das
   Produkt an und hängt danach die gewählten Dateien und auf Wunsch das Bild an (`POST
   /api/material/recherche/<lauf>/anhaengen`, nur an ein nach dem Lauf angelegtes Produkt, an einer Meldung nur an ihr
-  Produkt; wiederholbar, ein eigenes Bild gewinnt). Fehlt eine Datei, bleibt der Dialog offen und ein zweiter Klick
-  hängt nur an, was fehlt. Weitere Ausführungen legt man danach mit „Produkt anlegen“ nacheinander an. Journal: Läufe
-  ohne Meldung unter „Recherche (Claude API)“ (entity `ki_lauf`) am Produkt – nur für die Material-Verwaltung.
+  Produkt; nie eine Ausführung, die schon als anderes Produkt im Katalog steht, und je Produkt nur eine Ausführung;
+  wiederholbar, ein eigenes Bild gewinnt). Fehlt eine Datei, bleibt der Dialog offen („Das Produkt ist angelegt, aber
+  nicht alles hängt dran“) und „Fehlendes anhängen“ hängt nur an, was fehlt. Weitere Ausführungen legt man danach mit „Produkt anlegen“ nacheinander an. Journal: Läufe
+  ohne Meldung unter „Recherche (Claude API)“ (entity `ki_lauf`; „Recherche nachgeladen“, wenn später Dateien dazukommen)
+  am Produkt – nur für die Material-Verwaltung, bestimmt aus dem Journal selbst (bleibt auch nach einer Kontolöschung).
 - **Einschalten:** unter **Leitstelle → Einstellungen → Materialablage → „Schlüssel für die Claude API“** (seit dem
   21.11.2026; gilt sofort, ohne Neustart) oder als `ANTHROPIC_API_KEY` in der `.env` des Klons, danach
   `docker compose up -d` (ein bloßer `docker restart` liest die `.env` nicht neu). Der gespeicherte Schlüssel hat wie

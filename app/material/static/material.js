@@ -5057,7 +5057,13 @@
           } else if (bildWahl.entfernen) {
             await api(`${API}/produkte/${pid}/bild`, { method: "DELETE" });
           }
-          if (anhang && anhang.fehler.length) { knopf.disabled = false; return; }
+          // Teilfehler (O4): Das Produkt steht, der Dialog bleibt offen – die Hauptaktion hängt nur noch an, was fehlt.
+          // Abgelehnt (AB5): Satz im Reiter „Produkt“, der nächste Klick speichert nur noch die Angaben.
+          if (anhang && (anhang.fehler.length || anhang.abgelehnt)) {
+            knopf.textContent = anhang.fehler.length ? "Fehlendes anhängen" : "Speichern";
+            knopf.disabled = false;
+            return;
+          }
           dlg.close();
           if (opt.danach) await opt.danach(r.produkt);
           else location.href = S.ziel(`/materialablage/katalog/produkt/${pid}`);
@@ -8948,11 +8954,12 @@
     let domains = null;              // Eingabe im Feld „Herstellerseite“ – null: der Vorschlag des Servers
     const haken = { fotos: false, bemerkung: false };
     let nr = null;                   // gewählte Ausführung
-    let neuOffen = false;            // „Neu recherchieren“ aufgeklappt
+    let neuOffen = false;            // „Erneut recherchieren“ unter dem Vorschlag aufgeklappt
     let hinweis = null;              // E3: zum Produkt gibt es eine offene Meldung (Antwort des Starts)
     let startFehler = null;          // {text, produkt}: 409 (auch E2), 429, 503 beim Start
     let gestartet = "";              // Name des Produkts beim Start (für den Toast am Ende)
     let uebernahme = null;           // {lauf, a, felder} nach „In die Felder übernehmen“
+    let fest = null;                 // Ausführung, aus der das Produkt schon angelegt ist (S2: danach keine andere)
     let nachfrage = null;
     const aus = new AbortController();
     dlg.addEventListener("close", () => { aus.abort(); clearTimeout(nachfrage); }, { once: true });
@@ -8979,7 +8986,9 @@
       const grund = !m && (!x.manufacturer || !x.model) ? "Bitte zuerst im Reiter „Produkt“ Hersteller und Modell eintragen."
         : startFehler ? startFehler.text : d.moeglich && !d.moeglich.an ? d.moeglich.grund : "";
       const herkunft = (s.domains_aus_links || []).length;
-      return `${r && r.vorschlag ? `<p>Die neue Recherche ersetzt den Vorschlag vom ${esc(fmtZeit(r.gestartet_am))}.</p>` : ""}
+      // Ist das Kontingent selbst der Sperrgrund („Kontingent für … aufgebraucht“), steht nur dieser Satz da.
+      const kontingent = d.moeglich && !(grund && grund === d.moeglich.grund && !d.moeglich.rest && grund.startsWith("Kontingent"));
+      return `${r && r.vorschlag && anlegbar(r).length ? `<p>Die neue Recherche ersetzt den Vorschlag vom ${esc(fmtZeit(r.gestartet_am))}.</p>` : ""}
         <p>${m ? "Recherchiert wird die Meldung" : "Recherchiert wird"}: ${name ? `<strong>${esc(name)}</strong>${x.article_no ? ` <span class="mat-ganz">(${esc(x.article_no)})</span>` : ""}` : '<span class="muted">noch ohne Hersteller und Modell</span>'}</p>
         <label for="pd-rs-domains">Herstellerseite</label>
         <input type="text" id="pd-rs-domains" value="${esc(domains !== null ? domains : s.domains.join(", "))}" ${TASTATUR_ADRESSE} aria-describedby="pd-rs-domains-hilfe${herkunft ? " pd-rs-domains-herkunft" : ""}">
@@ -8989,15 +8998,15 @@
         ${m && s.bemerkung ? `<div class="mat-feldkopf">Bemerkung des Melders</div><p class="mat-text mat-recherche-bemerkung">${esc(s.bemerkung)}</p>
           <label class="inline"><input type="checkbox" id="pd-rs-bemerkung"${haken.bemerkung ? " checked" : ""}> Bemerkung mitschicken</label>` : ""}
         ${datenschutzHtml(s.datenschutz)}
-        ${d.moeglich ? `<p class="help">Kontingent: noch ${d.moeglich.rest} von ${d.moeglich.grenze} in diesem Monat.</p>` : ""}
+        ${kontingent ? `<p class="help">Kontingent: noch ${d.moeglich.rest} von ${d.moeglich.grenze} in diesem Monat.</p>` : ""}
         ${grundSatz("pd-rs-grund", grund)}
         ${startFehler && startFehler.produkt ? `<p class="help"><a href="/materialablage/katalog/produkt/${startFehler.produkt.id}" target="_blank" rel="noopener">${esc(startFehler.produkt.name)} öffnen</a></p>` : ""}
-        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-los"${knopfAus("pd-rs-grund", grund)}>${r && !r.vorschlag ? "Erneut recherchieren" : "Recherchieren"}</button></div>`;
+        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-los"${knopfAus("pd-rs-grund", grund)}>${r && !r.vorschlag ? "Erneut recherchieren" : "Recherchieren lassen"}</button></div>`;
     }
     const verwerfenKnopf = () => (m ? "" : ' <button type="button" class="lnk" id="pd-rs-verwerfen">Verwerfen</button>');
     function laufHtml(r) {
       return `<p class="mat-recherche-zeile"><span class="mat-recherche-stand" role="status" tabindex="-1">${esc(rechercheStand(r))}</span>
-          <button type="button" class="lnk" id="pd-rs-abbrechen">Abbrechen</button></p>
+          <button type="button" class="lnk" id="pd-rs-abbrechen">Recherche abbrechen</button></p>
         <p class="help">Die Recherche läuft weiter, wenn du den Dialog schließt – du findest sie hier wieder.</p>`;
     }
     function endeHtml(r) {
@@ -9008,8 +9017,10 @@
       const v = r.vorschlag, e = r.eingabe || {};
       const je = jeAusfuehrung(v);
       const frei = anlegbar(r);
-      // D3 A: vorgewählt die Ausführung mit der Artikelnummer aus dem Reiter „Produkt“, sonst die erste anlegbare.
-      if (!frei.some((a) => a.nr === nr)) {
+      // D3 A: vorgewählt die Ausführung mit der Artikelnummer aus dem Reiter „Produkt“, sonst die erste anlegbare. Ist
+      // das Produkt schon angelegt (Teilfehler), bleibt seine Ausführung gewählt und die anderen sind gesperrt (S2).
+      if (fest !== null) nr = fest;
+      else if (!frei.some((a) => a.nr === nr)) {
         const eigen = vergleichbar(angaben().article_no);
         nr = ((eigen && frei.find((a) => vergleichbar(a.felder.article_no && a.felder.article_no.wert) === eigen)) || frei[0] || {}).nr || null;
       }
@@ -9017,15 +9028,15 @@
         const bild = a.bild ? v.dateien.find((f) => f.n === a.bild) : null;
         const anr = a.felder.article_no && a.felder.article_no.wert;
         return `<section class="mat-vs-ausf${a.anlegbar ? "" : " nicht"}"><div class="mat-vs-ausf-kopf"><div>
-          <label class="inline mat-rs-wahl"><input type="radio" name="pd-rs-nr" value="${a.nr}"${a.nr === nr ? " checked" : ""}${a.anlegbar ? "" : " disabled"}> Ausführung ${a.nr}${anr ? `: <span class="mat-ganz">${esc(anr)}</span>` : ""}</label>
+          <label class="inline mat-rs-wahl"><input type="radio" name="pd-rs-nr" value="${a.nr}"${a.nr === nr ? " checked" : ""}${(fest === null ? a.anlegbar : a.nr === fest) ? "" : " disabled"}> Ausführung ${a.nr}${anr ? `: <span class="mat-ganz">${esc(anr)}</span>` : ""}</label>
           ${a.im_katalog ? `<p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}" target="_blank" rel="noopener">${esc(a.im_katalog.name)}</a>.</p>` : ""}</div>
           ${bild && bild.datei ? `<a class="mat-vs-bild" href="${esc(url.datei(r, bild.n))}" target="_blank" rel="noopener"><img src="${esc(url.datei(r, bild.n))}" alt="${esc(`Bild ${anr || `der Ausführung ${a.nr}`}`)}" loading="lazy"></a>` : ""}</div>
           ${ausfuehrungTabelle(a, kats, je)}</section>`;
       };
-      const grund = frei.length ? "" : "Alle Ausführungen stehen schon im Katalog – es gibt nichts zu übernehmen.";
+      const grund = frei.length || fest !== null ? "" : "Alle Ausführungen stehen schon im Katalog – es gibt nichts zu übernehmen.";
       return `<p class="small muted mat-rs-kopf">Vorschlag vom <span class="name-einheit">${esc(fmtZeit(r.gestartet_am))}${r.von ? ` (${person(r.von)})` : ""}</span>${rechercheKosten(r)}${(e.domains || []).length ? ` · Herstellerseite ${esc(e.domains.join(", "))}` : ""}${verwerfenKnopf()}</p>
         ${r.status === "uebernommen" && (r.produkte || []).length ? `<p>Daraus angelegt: ${produktLinks(r.produkte)}</p>` : ""}
-        ${m && frei.length > 1 ? "<p class=\"help\">Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung.</p>" : ""}
+        ${fest !== null ? `<p class="help">Das Produkt ist aus Ausführung ${fest} angelegt – die Wahl bleibt.</p>` : m && frei.length > 1 ? "<p class=\"help\">Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung.</p>" : ""}
         ${v.ausweichmodell ? `<p class="notice">Geantwortet hat auch das Ausweichmodell ${esc(v.ausweichmodell)} – die Kosten sind nur geschätzt.</p>` : ""}
         <h3>Gemeinsam</h3>
         ${gemeinsamTabelle(v, kats, je)}
@@ -9036,7 +9047,7 @@
         ${vorschlagListen(v)}
         ${grundSatz("pd-rs-ue-grund", grund)}
         <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-uebernehmen"${knopfAus("pd-rs-ue-grund", grund)}>In die Felder übernehmen</button></div>
-        <p class="mat-rs-neu"><button type="button" class="lnk" id="pd-rs-neu" aria-expanded="${neuOffen}" aria-controls="pd-rs-startteil">Neu recherchieren</button></p>
+        <p class="mat-rs-neu"><button type="button" class="lnk" id="pd-rs-neu" aria-expanded="${neuOffen}" aria-controls="pd-rs-startteil">Erneut recherchieren</button></p>
         <div id="pd-rs-startteil"${neuOffen ? "" : " hidden"}>${startHtml(r)}</div>`;
     }
 
@@ -9049,7 +9060,12 @@
       }
       const r = lauf();
       const oben = hinweis ? `<p class="notice">${esc(hinweis.text)} <a href="/materialablage/katalog/meldungen" target="_blank" rel="noopener">Zu den Produktmeldungen</a></p>` : "";
-      teil.innerHTML = oben + (rechercheLaeuft(r) ? laufHtml(r) : r && r.vorschlag ? vorschlagHtml(r) : `${r ? endeHtml(r) : ""}${startHtml(r)}`);
+      // AB4 (3.4): Gibt es keine anlegbare Ausführung mehr (alle stehen im Katalog), steht der Startteil da, gleich in
+      // welchem Status – über ihm ein Satz, warum. Ein Vorschlag ganz ohne Ausführung bleibt stehen.
+      const nichtsMehr = r && r.vorschlag && r.vorschlag.ausfuehrungen.length && !anlegbar(r).length && fest === null;
+      teil.innerHTML = oben + (rechercheLaeuft(r) ? laufHtml(r)
+        : nichtsMehr ? `<p>Alle Ausführungen des Vorschlags vom ${esc(fmtZeit(r.gestartet_am))} stehen schon im Katalog.</p>${startHtml(r)}`
+        : r && r.vorschlag ? vorschlagHtml(r) : `${r ? endeHtml(r) : ""}${startHtml(r)}`);
       verdrahten();
       hinweisZeigen();
     }
@@ -9113,7 +9129,11 @@
         hinweis = res.hinweis || null;
         startFehler = null; neuOffen = false; nr = null; domains = null;
         d = Object.assign({}, d, { recherche: res.recherche, moeglich: res.moeglich });
-        toast("Recherche gestartet");
+        // AB2: Der neue Lauf hat die Dateien des alten entfernt – die Übernahme verweist nicht mehr auf ihn. Die
+        // übernommenen Werte bleiben in den Feldern, nur Fundstellen und „Dateien aus der Recherche“ gehen.
+        const warUebernommen = Boolean(uebernahme);
+        if (warUebernommen) { uebernahme = null; fest = null; dateienZeichnen(); produktFeldQuellen(body, {}); }
+        toast(warUebernommen ? "Recherche gestartet. Die Dateien des alten Vorschlags werden nicht mehr angehängt." : "Recherche gestartet");
         zeichnen();
         beobachten();
         const stand = $(".mat-recherche-stand", teil);
@@ -9142,10 +9162,15 @@
     }
     async function verwerfen() {
       const r = lauf();
-      if (!(await confirm(`Vorschlag zu „${laufName()}“ verwerfen? Seine Dateien werden gelöscht; die Recherche zählt weiter zum Kontingent.`, "Verwerfen"))) return;
+      // Ohne Vorschlag (abgebrochen, gescheitert) geht nichts verloren: keine Dateien, keine endgültige Rückfrage (O3).
+      const ja = r.vorschlag
+        ? await confirm(`Vorschlag zu „${laufName()}“ verwerfen? Seine Dateien werden gelöscht; die Recherche zählt weiter zum Kontingent.`, "Verwerfen")
+        : await confirm(`Die ${r.status === "abgebrochen" ? "abgebrochene" : "gescheiterte"} Recherche aus dem Reiter nehmen? Sie zählt weiter zum Kontingent.`,
+          "Aus dem Reiter nehmen", "Abbrechen", { endgueltig: false });
+      if (!ja) return;
       try {
         await api(`${API}/recherche/${r.id}/verwerfen`, { method: "POST", body: {} });
-        toast("Vorschlag verworfen");
+        toast(r.vorschlag ? "Vorschlag verworfen" : "Recherche aus dem Reiter genommen");
         if (uebernahme && uebernahme.lauf.id === r.id) { uebernahme = null; dateienZeichnen(); }
       } catch (e) { toast(e.message, true); }
       if (offen()) { await laden(); zeichnen(); }
@@ -9187,7 +9212,8 @@
     // stehen nur als „Nicht vorbelegt (…): …“ unter dem Feld.
     function inFelder() {
       const r = lauf(), v = r.vorschlag;
-      const a = anlegbar(r).find((x) => x.nr === nr);
+      // Nach dem Anlegen steht die festgelegte Ausführung selbst im Katalog – sie bleibt übernehmbar (S2).
+      const a = v.ausfuehrungen.find((x) => x.nr === nr && (fest === null ? x.anlegbar : x.nr === fest));
       if (!a) return;
       const gesetzt = [], quellen = {};
       RS_FELDER.forEach((k) => {
@@ -9207,6 +9233,7 @@
       uebernahme = { lauf: r, a, felder: gesetzt };
       dateienZeichnen();
       reiterZeigen("produkt", true);
+      hinweisZeigen();               // der Hinweis „… ist fertig“ hat sich mit der Übernahme erledigt (O5)
       toast(`${plural(gesetzt.length, "Feld", "Felder")} übernommen – bitte prüfen`);
     }
     // D4 A: „Dateien aus der Recherche“ unter dem Bildfeld – je Dokument der gewählten Ausführung ein Häkchen (Vorwahl
@@ -9230,25 +9257,48 @@
         ${nicht.map((f) => `<p class="small mat-ue-nicht">${f.url ? fremdLink(f.url, esc(f.titel)) : esc(f.titel)} <span class="muted">(${art(f)})</span> – ${esc(grund(f))}</p>`).join("")}
         ${!wahl.length && !nicht.length ? '<p class="help">Zu dieser Ausführung hat die Recherche keine Dokumente gefunden.</p>' : ""}
         ${bild ? `<label class="inline mat-ue-bild"><input type="checkbox" id="pd-rs-bild"${bildWahl.datei ? "" : " checked"}> Bild aus der Recherche übernehmen <img src="${esc(url.datei(r, bild.n))}" alt="" loading="lazy"></label>` : ""}
-        <div class="mat-rs-fehler" role="alert"></div></fieldset>`;
+        <div class="mat-rs-fehler" role="alert" tabindex="-1"></div></fieldset>`;
     }
+    // O4: Nach einem Teilfehler steht das Produkt schon – der Satz sagt das, darunter die fehlenden Dateien mit Link; der
+    // Fokus geht auf die Meldung (die Hauptaktion heißt dann „Fehlendes anhängen“, produktDialog).
     function fehlerZeigen(fehler) {
       const el = $("#pd-rs-dateien .mat-rs-fehler", body);
       if (!el) return;
-      el.innerHTML = fehler.length ? `<p class="error">Nicht angehängt – bitte über den Link von Hand hochladen oder noch einmal „Anlegen“ (es hängt nur an, was fehlt):</p>
+      el.innerHTML = fehler.length ? `<p>Das Produkt ist angelegt, aber nicht alles hängt dran:</p>
         <ul class="mat-vs-liste">${fehler.map((f) => { const titel = `<strong>${esc(f.titel || "Datei")}</strong>`; return `<li>${f.url ? fremdLink(f.url, titel) : titel}: ${esc(f.fehler)}</li>`; }).join("")}</ul>` : "";
     }
-    // Nach dem Anlegen (produktDialog): die gewählten Dateien an das Produkt – nur nach „In die Felder übernehmen“.
+    // Fokus auf die Meldung (kein Eingabefeld – auch am Finger), mittig im Bild: unten klebt die Knopfzeile.
+    function meldungZeigen(el) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "center" });
+    }
+    /* Nach dem Anlegen (produktDialog): die gewählten Dateien an das Produkt – nur nach „In die Felder übernehmen“.
+       Danach ist die Ausführung festgelegt (S2). Lehnt der Server mit 404 oder 409 ab (der Vorschlag wurde inzwischen
+       verworfen oder ersetzt, etwa in einem zweiten Tab), fällt die Übernahme weg und das Anlegen geht mit dem eigenen
+       Bild weiter (AB5): {fehler: [], abgelehnt: Text} – der Dialog bleibt mit dem Satz offen. */
     async function anhaengen(pid, eigenesBild) {
       if (!uebernahme) return null;
       const platz = $("#pd-rs-dateien", body);
       const bildHaken = $("#pd-rs-bild", platz);
-      const res = await api(`${API}/recherche/${uebernahme.lauf.id}/anhaengen`, { method: "POST", body: {
-        product_id: pid, nr: uebernahme.a.nr, dateien: $$(".pd-rs-datei:checked", platz).map((c) => +c.value),
-        bild: Boolean(bildHaken && bildHaken.checked && !eigenesBild), felder: uebernahme.felder } });
+      let res;
+      try {
+        res = await api(`${API}/recherche/${uebernahme.lauf.id}/anhaengen`, { method: "POST", body: {
+          product_id: pid, nr: uebernahme.a.nr, dateien: $$(".pd-rs-datei:checked", platz).map((c) => +c.value),
+          bild: Boolean(bildHaken && bildHaken.checked && !eigenesBild), felder: uebernahme.felder } });
+      } catch (e) {
+        if (![404, 409].includes(e.status)) throw e;
+        uebernahme = null;
+        fest = null;
+        dateienZeichnen();
+        platz.innerHTML = `<div class="mat-rs-fehler" role="alert" tabindex="-1"><p>Das Produkt ist angelegt, die Dateien aus der Recherche hängen aber nicht dran: ${esc(e.message)}</p></div>`;
+        reiterZeigen("produkt");
+        meldungZeigen($(".mat-rs-fehler", platz));
+        return { fehler: [], abgelehnt: e.message };
+      }
+      fest = uebernahme.a.nr;
       const a = res.anhaengen;
       fehlerZeigen(a.fehler);
-      if (a.fehler.length) { reiterZeigen("produkt"); platz.scrollIntoView({ block: "nearest" }); }
+      if (a.fehler.length) { reiterZeigen("produkt"); meldungZeigen($(".mat-rs-fehler", platz)); }
       return a;
     }
 

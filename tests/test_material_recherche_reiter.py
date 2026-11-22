@@ -901,9 +901,12 @@ def test_oberflaeche_statisch():
     assert pd.index('data-reiter="produkt"') < pd.index('data-reiter="bestandteile"') < pd.index('data-reiter="recherche"')
     reiter = _quelle(js, "function rechercheReiter(", "\n  }\n")
     assert 'class="btn"' not in reiter and "btn ghost" not in reiter and "btn danger" not in reiter
-    assert "…</button>" not in reiter and '"Erneut recherchieren" : "Recherchieren"}</button>' in reiter \
-        and "In die Felder übernehmen</button>" in reiter and ">Neu recherchieren</button>" in reiter \
-        and ">Verwerfen</button>" in reiter and ">Abbrechen</button>" in reiter
+    # Einheitliche Verben (O6, O7): „Recherchieren lassen“ wie an der Karte, „Erneut recherchieren“ auch unter einem
+    # Vorschlag, „Recherche abbrechen“ (nicht zweimal „Abbrechen“ im Dialog).
+    assert "…</button>" not in reiter and '"Erneut recherchieren" : "Recherchieren lassen"}</button>' in reiter \
+        and "In die Felder übernehmen</button>" in reiter and 'aria-controls="pd-rs-startteil">Erneut recherchieren</button>' in reiter \
+        and ">Verwerfen</button>" in reiter and ">Recherche abbrechen</button>" in reiter
+    assert "Neu recherchieren" not in reiter and ">Abbrechen</button>" not in reiter
     assert "mat-vorschlag" not in reiter.replace("mat-rs-vorschlag", "")
     assert "Bitte zuerst im Reiter „Produkt“ Hersteller und Modell eintragen." in reiter
     assert "Die Recherche läuft weiter, wenn du den Dialog schließt – du findest sie hier wieder." in reiter
@@ -915,7 +918,8 @@ def test_oberflaeche_statisch():
     # Die Übernahme in die Felder nutzt die Feldbausteine des Produktdialogs; Anlegen hängt danach an (3.4).
     assert "produktFeldQuellen(body, quellen);" in reiter and "quelleHilfe(f)" in reiter
     assert "const anhang = rs ? await rs.anhaengen(pid, Boolean(bild)) : null;" in pd \
-        and "if (anhang && anhang.fehler.length) { knopf.disabled = false; return; }" in pd
+        and "if (anhang && (anhang.fehler.length || anhang.abgelehnt)) {" in pd \
+        and 'knopf.textContent = anhang.fehler.length ? "Fehlendes anhängen" : "Speichern";' in pd
     assert 'fotoFeldVerdrahten(dlg, body, "pd-bild", () => { bildHoch = false; if (rs) rs.eigenesBild(); });' in pd
     assert "anthropic" not in js.lower()
     # Kein Piktogramm/Emoji in den neuen Knöpfen.
@@ -929,6 +933,41 @@ def test_oberflaeche_statisch():
     assert f'ki_lauf: "{beschriftung.ENTITAET["ki_lauf"]}"' in js
     for feld in ("ausfuehrung", "felder"):
         assert f'{feld}: "{beschriftung.FELD[feld]}"' in js, feld
+    # Nachbesserung: AB2 – nach einem neuen Start keine Übernahme mehr (Feldwerte bleiben), Satz dazu.
+    start = _quelle(reiter, "async function starten(knopf)", "\n    }\n")
+    assert "if (warUebernommen) { uebernahme = null; fest = null; dateienZeichnen(); produktFeldQuellen(body, {}); }" in start \
+        and "Die Dateien des alten Vorschlags werden nicht mehr angehängt." in start and "zeichnen();" in start
+    # AB4: ohne anlegbare Ausführung der Startteil, gleich welcher Status.
+    assert "const nichtsMehr = r && r.vorschlag && r.vorschlag.ausfuehrungen.length && !anlegbar(r).length && fest === null;" \
+        in reiter and "stehen schon im Katalog.</p>${startHtml(r)}" in reiter
+    # AB5: 404/409 beim Anhängen – Übernahme weg, Satz, weiter mit dem eigenen Bild.
+    anh = _quelle(reiter, "async function anhaengen(pid, eigenesBild)", "\n    }\n")
+    assert "if (![404, 409].includes(e.status)) throw e;" in anh and "uebernahme = null;" in anh \
+        and "return { fehler: [], abgelehnt: e.message };" in anh and "fest = uebernahme.a.nr;" in anh
+    # S2: nach dem ersten Anlegen ist die Ausführung gesperrt.
+    assert "if (fest !== null) nr = fest;" in reiter and '${(fest === null ? a.anlegbar : a.nr === fest) ? "" : " disabled"}' in reiter
+    # O3: Verwerfen ohne Vorschlag ohne „Vorschlag/Dateien“ und ohne danger.
+    verw = _quelle(reiter, "async function verwerfen()", "\n    }\n")
+    assert "Recherche aus dem Reiter nehmen? Sie zählt weiter zum Kontingent.`" in verw \
+        and '"Aus dem Reiter nehmen", "Abbrechen", { endgueltig: false }' in verw
+    # O4: Teilfehler – Satz, Fokus auf die Meldung (tabindex -1), nicht mehr fett über die ganze Breite (.error).
+    assert "Das Produkt ist angelegt, aber nicht alles hängt dran:" in reiter \
+        and '<div class="mat-rs-fehler" role="alert" tabindex="-1"></div>' in reiter \
+        and 'meldungZeigen($(".mat-rs-fehler", platz));' in anh and "el.focus({ preventScroll: true });" in reiter \
+        and 'class="error">Nicht angehängt' not in reiter
+    # O5: Nach „In die Felder übernehmen“ verschwindet der Hinweis.
+    assert "hinweisZeigen();               // der Hinweis" in _quelle(reiter, "function inFelder()", "\n    }\n")
+    # O8: Kontingent-Zeile nicht doppelt.
+    assert "const kontingent = d.moeglich && !(grund && grund === d.moeglich.grund && !d.moeglich.rest" in reiter \
+        and "${kontingent ? `<p class=\"help\">Kontingent: noch" in reiter
+    # O1, O2, O9 im CSS: nur im Produktdialog, Abstände ohne Tippflächen-Regeln außerhalb (pointer: coarse).
+    assert ".c-tabs.reiter-linie.mat-reiter:has(> #pd-reiter-recherche) button { padding-left: 8px; padding-right: 8px; } }" \
+        in block.split("@media (max-width: 359.98px) {", 1)[1] and ".c-tabs.reiter-linie button { padding" not in block
+    assert "dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { position: sticky; bottom: 0;" in block
+    assert "dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: calc(10dvh - 3px); margin-bottom: auto; }" in block
+    assert ".mat-variante-doks.mat-rs-dateien label.inline { align-items: center; }" in block
+    assert "@media (pointer: coarse) { .mat-rs-vorschlag .mat-recherche-zeile { margin-bottom: 18px; } }" in block
+    assert f'recherche_nachgeladen: "{beschriftung.AKTION["recherche_nachgeladen"]}"' in js
     print("Oberfläche des Reiters (statisch) bestanden.")
 
 
