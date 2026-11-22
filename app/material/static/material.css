@@ -490,6 +490,20 @@ html.fuehrung-leiste dialog:has(.mat-vorschlag) .dlg-body { max-height: min(80dv
 .mat-ue-ausf.nicht { color: var(--grau); }
 .mat-ue-bild img { width: 56px; height: 56px; object-fit: contain; border: 1px solid var(--linie); background: var(--weiss); }
 .mat-ue-nicht { margin: 6px 0; overflow-wrap: anywhere; }
+/* Reiter „Recherche“ im Produktdialog (22.11.2026): dieselben Bausteine wie „Vorschlag ansehen“ im schmalen
+   Produktdialog. Eigener Container (nicht .mat-vorschlag – das machte den ganzen Dialog breit, auch versteckt); die
+   Tabellen werden unter 640 px Reiterbreite zu Karten (Container „vorschlag“). Tippflächen regelt app.css unter
+   (pointer: coarse). */
+.mat-rs-vorschlag { container: vorschlag / inline-size; }
+.mat-rs-vorschlag h3 { margin: 18px 0 6px; }
+.mat-rs-kopf { margin: 0 0 8px; }
+.mat-rs-wahl { font-weight: 600; margin: 0 0 4px; }
+.mat-vs-ausf.nicht { color: var(--grau); }
+.mat-rs-neu { margin: 14px 0 4px; }
+.mat-rs-vorschlag .mat-recherche-stand:focus { outline: none; }
+.mat-rs-fehler:empty { display: none; }
+.mat-rs-fehler .error { margin: 8px 0 2px; }
+.mat-rs-hinweis .lnk { margin-left: 4px; }
 /* Änderungsanträge (Entscheidungen vom 21.10.2026; seit dem 24.10.2026 eigene Seite im Bestand): dieselben Karten und
    Marken wie die Produktmeldungen; je Sammelantrag die Liste „Feld: alt → neu“. */
 .mat-meldung.m-bestaetigt { border-left-color: var(--ok); }

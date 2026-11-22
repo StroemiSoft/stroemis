@@ -682,6 +682,60 @@ def test_rechte():
     print("Rechte der Recherche im Produktdialog bestanden.")
 
 
+# --- Oberfläche (statisch) ----------------------------------------------------------------------------------------
+
+def _quelle(text_, anfang, ende):
+    a = text_.index(anfang)
+    return text_[a:text_.index(ende, a + len(anfang))]
+
+
+def test_oberflaeche_statisch():
+    """Reiter „Recherche“ nur unter den Bedingungen von 3.1; im Reiter kein roter Knopf („Anlegen“ bleibt die eine
+    Hauptaktion); keine „…“ in Knöpfen, keine Piktogramme; Touch-Regeln nur unter (pointer: coarse); der Reiter trägt
+    nicht .mat-vorschlag (Dialogbreite); Beschriftungen in Python und JS gleich; kein „anthropic“ im JS."""
+    wurzel = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(wurzel, "app", "material", "static", "material.js"), encoding="utf-8") as fh:
+        js = fh.read()
+    with open(os.path.join(wurzel, "app", "material", "static", "material.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    pd = _quelle(js, "async function produktDialog(p, opt)", "\n  }\n")
+    assert "const mitRecherche = mitReiter && Boolean(DARF.recherche) && !p.id && !p.variante_von;" in pd
+    assert 'data-reiter="recherche">Recherche</button>' in pd and 'id="pd-teil-recherche"' in pd
+    # Reihenfolge der Reiter: Produkt | Bestandteile | Recherche.
+    assert pd.index('data-reiter="produkt"') < pd.index('data-reiter="bestandteile"') < pd.index('data-reiter="recherche"')
+    reiter = _quelle(js, "function rechercheReiter(", "\n  }\n")
+    assert 'class="btn"' not in reiter and "btn ghost" not in reiter and "btn danger" not in reiter
+    assert "…</button>" not in reiter and '"Erneut recherchieren" : "Recherchieren"}</button>' in reiter \
+        and "In die Felder übernehmen</button>" in reiter and ">Neu recherchieren</button>" in reiter \
+        and ">Verwerfen</button>" in reiter and ">Abbrechen</button>" in reiter
+    assert "mat-vorschlag" not in reiter.replace("mat-rs-vorschlag", "")
+    assert "Bitte zuerst im Reiter „Produkt“ Hersteller und Modell eintragen." in reiter
+    assert "Die Recherche läuft weiter, wenn du den Dialog schließt – du findest sie hier wieder." in reiter
+    assert "Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung." in reiter
+    assert 'document.visibilityState !== "visible"' in reiter and ", 5000)" in reiter
+    assert "{ endgueltig: false }" in reiter and "role=\"status\"" in reiter and "role=\"alert\"" in reiter
+    # Knöpfe und Textknöpfe: nur grau umrandet bzw. .lnk.
+    assert set(re.findall(r'<button type="button" class="([^"]+)"', reiter)) == {"btn secondary", "lnk"}
+    # Die Übernahme in die Felder nutzt die Feldbausteine des Produktdialogs; Anlegen hängt danach an (3.4).
+    assert "produktFeldQuellen(body, quellen);" in reiter and "quelleHilfe(f)" in reiter
+    assert "const anhang = rs ? await rs.anhaengen(pid, Boolean(bild)) : null;" in pd \
+        and "if (anhang && anhang.fehler.length) { knopf.disabled = false; return; }" in pd
+    assert 'fotoFeldVerdrahten(dlg, body, "pd-bild", () => { bildHoch = false; if (rs) rs.eigenesBild(); });' in pd
+    assert "anthropic" not in js.lower()
+    # Kein Piktogramm/Emoji in den neuen Knöpfen.
+    for knopf in re.findall(r"<button[^>]*>([^<]*)</button>", reiter):
+        assert not re.search(r"[←-⯿\U0001f300-\U0001faff]", knopf), knopf
+    # CSS des Reiters: keine 44 px außerhalb von (pointer: coarse), kein :hover, eigener Container.
+    block = _quelle(css, "/* Reiter „Recherche“ im Produktdialog", "/* Änderungsanträge")
+    assert "44px" not in block and ":hover" not in block and "48px" not in block
+    assert ".mat-rs-vorschlag { container: vorschlag / inline-size; }" in block
+    from app.material.services import beschriftung
+    assert f'ki_lauf: "{beschriftung.ENTITAET["ki_lauf"]}"' in js
+    for feld in ("ausfuehrung", "felder"):
+        assert f'{feld}: "{beschriftung.FELD[feld]}"' in js, feld
+    print("Oberfläche des Reiters (statisch) bestanden.")
+
+
 if __name__ == "__main__":
     test_start_ohne_meldung()
     test_eigener_lauf_und_verwerfen()
@@ -689,3 +743,4 @@ if __name__ == "__main__":
     test_anhaengen_aus_meldung()
     test_aufraeumen_konto_tote()
     test_rechte()
+    test_oberflaeche_statisch()
