@@ -490,6 +490,51 @@ html.fuehrung-leiste dialog:has(.mat-vorschlag) .dlg-body { max-height: min(80dv
 .mat-ue-ausf.nicht { color: var(--grau); }
 .mat-ue-bild img { width: 56px; height: 56px; object-fit: contain; border: 1px solid var(--linie); background: var(--weiss); }
 .mat-ue-nicht { margin: 6px 0; overflow-wrap: anywhere; }
+/* Reiter „Recherche“ im Produktdialog (22.11.2026): dieselben Bausteine wie „Vorschlag ansehen“ im schmalen
+   Produktdialog. Eigener Container (nicht .mat-vorschlag – das machte den ganzen Dialog breit, auch versteckt); die
+   Tabellen werden unter 640 px Reiterbreite zu Karten (Container „vorschlag“). Tippflächen regelt app.css unter
+   (pointer: coarse). */
+.mat-rs-vorschlag { container: vorschlag / inline-size; }
+.mat-rs-vorschlag h3 { margin: 18px 0 6px; }
+.mat-rs-kopf { margin: 0 0 8px; }
+.mat-rs-wahl { font-weight: 600; margin: 0 0 4px; }
+.mat-vs-ausf.nicht { color: var(--grau); }
+.mat-rs-neu { margin: 14px 0 4px; }
+.mat-rs-vorschlag .mat-recherche-stand:focus { outline: none; }
+.mat-rs-fehler:empty { display: none; }
+/* Teilfehler beim Anlegen (Nachbesserung O4): ein kurzer Satz und die Liste – kein fetter roter Satz über die ganze
+   Breite; der Strich links zeigt, wohin der Fokus springt. */
+.mat-rs-fehler { margin: 10px 0 2px; padding-left: 10px; border-left: 3px solid var(--rot); }
+.mat-rs-fehler > p { margin: 4px 0; }
+.mat-rs-fehler:focus { outline: none; }
+.mat-rs-fehler:focus-visible { outline: 2px solid var(--rot); outline-offset: 2px; }
+.mat-rs-hinweis .lnk { margin-left: 4px; }
+/* O9: Abstand unter der Zeile mit „Verwerfen“ bzw. „Recherche abbrechen“ – am Finger ragt die Tippfläche des
+   Textknopfs (app.css, .lnk) 14 px unter die Zeile und lag sonst auf dem nächsten Absatz. */
+.mat-rs-vorschlag .mat-recherche-zeile { margin-bottom: 10px; }
+@media (pointer: coarse) { .mat-rs-vorschlag .mat-recherche-zeile { margin-bottom: 18px; } }
+/* O9: Häkchen und Beschriftung auf einer Linie, das Vorschaubild mittig daneben (baseline setzte den Kasten höher). */
+.mat-variante-doks.mat-rs-dateien label.inline { align-items: center; }
+/* O1: Mit dem dritten Reiter passt die Leiste auf 344 px (Fold zugeklappt) nur mit kleinerem Innenabstand – nur hier. */
+@media (max-width: 359.98px) {
+  .c-tabs.reiter-linie.mat-reiter:has(> #pd-reiter-recherche) button { padding-left: 8px; padding-right: 8px; } }
+/* O2: Der Reiter „Recherche“ ist lang (Vorschlag mit Karten) – solange er offen ist, klebt die Knopfzeile auch am
+   Rechner unten wie unter (pointer: coarse) in app.css. */
+dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])):has(> .dlg-actions:last-child) {
+  padding-bottom: 0; container-type: scroll-state; }
+dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { position: sticky; bottom: 0; z-index: 2;
+  background: var(--weiss); padding: 10px 0 20px; }
+@container scroll-state(scrollable: bottom) {
+  dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { box-shadow: 0 -10px 10px -10px rgba(0, 0, 0, .25); }
+}
+@media (max-height: 500px) { dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { padding-bottom: 14px; } }
+/* O9: Kein Höhensprung zwischen den Reitern – der Dialog hängt oben, wo ein ganz hoher Dialog ohnehin stünde (app.css:
+   80dvh Inhalt + 6 px Rand, mittig = 10dvh − 3 px; am Telefon 8 px, bei wenig Höhe 4 px). Der Reiter „Produkt“ füllt
+   die Höhe fast immer, dann ändert sich nichts; der kürzere Reiter „Recherche“ (läuft) verschiebt die Reiterleiste nicht
+   mehr. :where() hält die Regel so schwach wie „dialog“: offene Tastatur und Fold mit zwei Hälften (app.css) gehen vor. */
+dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: calc(10dvh - 3px); margin-bottom: auto; }
+@media (max-width: 640px) { dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: 8px; } }
+@media (max-height: 500px) { dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: 4px; } }
 /* Änderungsanträge (Entscheidungen vom 21.10.2026; seit dem 24.10.2026 eigene Seite im Bestand): dieselben Karten und
    Marken wie die Produktmeldungen; je Sammelantrag die Liste „Feld: alt → neu“. */
 .mat-meldung.m-bestaetigt { border-left-color: var(--ok); }

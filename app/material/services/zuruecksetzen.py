@@ -25,9 +25,10 @@ einer, bricht der Befehl ab, bevor er etwas ändert; sonst hält er dessen Sperr
 bekommt 409. Nach dem COMMIT leert er DATA_DIR/katalog-import (Aufträge, Berichte, Dateien von Probeläufen beziehen sich
 auf den geleerten Katalog); die Sperrdatei bleibt.
 
-Recherche per Claude API (services/recherche.py, 21.11.2026): Ihre Läufe stehen im Kernschema (ki_laeufe), gehören aber zu
-Meldungen des Moduls – in derselben exklusiven Transaktion werden die Zeilen der Art „mat_recherche“ gelöscht (andere
-Arten bleiben), nach dem COMMIT ihre Ordner unter DATA_DIR/ki.
+Recherche per Claude API (services/recherche.py, 21.11.2026): Ihre Läufe stehen im Kernschema (ki_laeufe), gehören aber zum
+Modul – zu Meldungen bzw. (seit dem 22.11.2026, Reiter im Produktdialog) zum Katalog. In derselben exklusiven
+Transaktion werden alle Zeilen der Art „mat_recherche“ gelöscht, mit und ohne Meldung (andere Arten bleiben), nach dem
+COMMIT ihre Ordner unter DATA_DIR/ki.
 
 Ablauf (zuruecksetzen):
   1. Das frische Schema entsteht zuerst in einer Vorlage im Speicher: models.migrieren auf einer leeren Datenbank, die

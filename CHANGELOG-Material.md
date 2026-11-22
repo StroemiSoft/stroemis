@@ -114,6 +114,7 @@ Geschichte stehen. Schemaversion nach der Nachbesserung vor dem Merge: 30; mit d
 | Spaltenabschnitt an der Schreibstelle | Ein „:::“ ohne Schlusszeile (etwa ein Hinweis, dessen „:::“ am Ende der letzten Textzeile steht) gilt im Editor nicht mehr als Abschnitt bis zum Artikelende – ein neuer Spaltenabschnitt kommt wieder an den Schreibstrich statt ans Artikelende | gebaut 11.11.2026 (kein Schemaschritt) |
 | Kopfleiste der Entwicklung | Auf dev.strömis.de „Entwicklungsserver“ statt „Strömungsrettung“, darunter „dev.strömis.de“; Maskottchen mit Leitkegel als Hut (Kopfleiste, Anmeldung, öffentliche Strömipedia, Hinweisseite ohne Netz); Produktion unverändert | gebaut 11.11.2026 (kein Schemaschritt), Zweig dev-kopf |
 | Recherche per Claude API an Produktmeldungen | Material-Verwaltung lässt zu einer offenen Meldung recherchieren (Claude API, gemeinsamer Baustein `app/ki.py`, Tabelle `ki_laeufe` im Kernschema): Vorschlag je Ausführung mit Fundstellen nach den Katalogregeln, Downloads nur von Herstellerdomains, Dokumentprüfung je PDF, Übernahme mehrerer Ausführungen auf einmal; nur mit `ANTHROPIC_API_KEY`. Schnittstelle (KERN) und Oberfläche (Knopf und Statuszeile an der Meldung, Startdialog, „Vorschlag ansehen“, Übernahme); Nachbesserung nach Sicherheits-, Ablauf- und Browserprüfung | gebaut 21.11.2026 (kein Schemaschritt der Materialablage, Schema bleibt 40) |
+| Recherche im Produktdialog | Dritter Reiter „Recherche“ in „Produkt anlegen“ und „Produkt aus Meldung anlegen“ (Material-Verwaltung mit Schlüssel): recherchiert mit den Angaben aus dem Formular bzw. dem Lauf der Meldung, „In die Felder übernehmen“, Dateien aus der Recherche beim Anlegen; Läufe ohne Meldung (Bezug `mat_katalog`, je Konto der jüngste), Verwerfen, Anhängen für beide Herkünfte | gebaut 22.11.2026, nach den Prüfungen nachgebessert (kein Schemaschritt, Schema bleibt 40), Zweig ki-recherche-reiter, nur dev |
 
 ## Abgleich mit dem Bestand (vor Lieferung 1)
 
@@ -14426,3 +14427,109 @@ Nacharbeit toter Läufe; `tests/test_material_recherche.py` an den Leseweg ohne 
 - **Tests:** `tests/test_ki.py` – neu `test_schluessel_leitstelle` (nie ausgeliefert, Prüfung beim Speichern, Vorrang,
   leer behält, Zurücksetzen, Notausgang, Thread, Liste ohne Neustart, Schwärzen, echter Client); die statische Prüfung
   erlaubt den Namen jetzt auch in `app/einstellungen.py` (geheimes Feld), weiter nie in Vorlagen und JS.
+
+## Recherche im Produktdialog (Wunsch, 22.11.2026)
+
+Wunsch: „Füge die Recherche als Tab unter Produkt anlegen hinzu“. Entwurf `planung/material-phase4/
+entwurf_recherche_reiter_produkt.md`, Entscheidungen „Alles Empfehlung“ (A1–K2 jeweils A). Kein Schemaschritt – die
+Läufe stehen weiter in `ki_laeufe`, Schema bleibt 40. Nur auf dev (wie die Recherche selbst).
+
+- **Reiter „Recherche“** im Produktdialog, dritter neben „Produkt“ und „Bestandteile“: nur für die Material-Verwaltung
+  mit API-Schlüssel (neues Feld `recherche` in `data-darf`; die Übung kennt es nicht) und nur in „Produkt anlegen“ und
+  „Produkt aus Meldung anlegen“ – nicht beim Bearbeiten, bei einer Variante und in der Nacharbeit. Der Dialog öffnet wie
+  bisher im Reiter „Produkt“.
+- **Ohne Meldung** recherchiert der Reiter mit Hersteller, Modell, Artikelnummer, Norm, Kategorie und Bemerkung aus dem
+  Reiter „Produkt“ (gelesen bei jedem Wechsel; „Recherchiert wird: …“; ohne Hersteller oder Modell ist „Recherchieren
+  lassen“ ausgegraut mit Satz). Feld „Herstellerseite“ (1–3 Domains, vorbelegt aus der letzten Recherche zum selben Hersteller;
+  eine Eingabe von Hand bleibt), Datenschutzliste, Kontingent. Steht das Produkt schon im Katalog, gibt es keinen Start
+  (Satz und Link zum Produkt); zu einer offenen Meldung desselben Produkts erscheint ein Hinweis mit Link zu den
+  Produktmeldungen.
+- **Aus einer Meldung** liest und startet der Reiter den Lauf der Meldung (dieselben Routen wie die Karte, mit Häkchen
+  für Fotos und Bemerkung). Ein vorhandener Vorschlag steht sofort da; bei mehreren anlegbaren Ausführungen der Satz
+  „Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung.“
+- **Läuft** die Recherche: Statuszeile mit „Recherche abbrechen“ (Rückfrage), Satz „Die Recherche läuft weiter, wenn du den Dialog
+  schließt – du findest sie hier wieder.“, Nachfrage alle 5 s (nur bei offenem Dialog und sichtbarer Seite), am Ende ein
+  Toast. Oben im Reiter „Produkt“ steht beim Öffnen „Deine Recherche zu „…“ läuft“ bzw. „… ist fertig“ mit Textknopf.
+- **Fertig:** dieselben Bausteine wie „Vorschlag ansehen“ (Gemeinsam, Ausführungen, Dateien, Hinweise, Rückfragen; am
+  Telefon Karten, der Dialog bleibt schmal), je Ausführung ein Optionsfeld (vorgewählt die Artikelnummer aus dem
+  Formular, sonst die erste anlegbare; Ausführungen im Katalog ausgegraut mit Link), „Verwerfen“ (ohne Meldung) und
+  „Erneut recherchieren“ (zugeklappt). **„In die Felder übernehmen“** setzt Kategorie (mit ihren Vorgaben), dann die
+  übrigen belegten Werte der Ausführung, überschreibt Getipptes, lässt nicht Belegtes stehen, zeigt unter jedem Feld die
+  Fundstelle bzw. „Nicht vorbelegt (…): …“ und wechselt in den Reiter „Produkt“ („n Felder übernommen – bitte prüfen“).
+  Unter dem Bildfeld erscheint **„Dateien aus der Recherche“** (Häkchen je Dokument der Ausführung, nicht angebotene mit
+  Grund und Link, „Bild aus der Recherche übernehmen“ mit Vorschau – ein eigenes Bild gewinnt).
+- **Anlegen** bleibt die eine rote Hauptaktion: erst die Angaben (bzw. aus der Meldung wie bisher anlegen und erledigen,
+  Mail an den Melder), dann `POST /api/material/recherche/<lauf>/anhaengen`, dann ein eigenes Bild. Fehlt eine Datei,
+  bleibt der Dialog offen („Das Produkt ist angelegt, aber nicht alles hängt dran:“ mit Liste und Link je Datei,
+  `role="alert"`, Fokus darauf), die Hauptaktion heißt dann „Fehlendes anhängen“ und hängt nur an, was fehlt.
+- **Server** (`services/recherche.py`, `routes_recherche.py`): Läufe ohne Meldung mit Bezug `mat_katalog`, Eigentümer
+  über `gestartet_von` (nicht im Bezug – Kontokennungen werden wieder vergeben); `katalog_starten`, `katalog_lesen`
+  (jüngster eigener Lauf; nicht, wenn verworfen, nach der Frist der Dateien oder ohne anlegbare Ausführung), `lauf_lesen`,
+  `lauf_abbrechen`, `lauf_datei`, `verwerfen` (nur wer startete, nicht während des Laufs; Dateien sofort weg, Eingabe
+  und Vorschlag bleiben), `anhaengen` für Läufe mit und ohne Meldung (nur angebotene Dateien dieser Ausführung, nur ein
+  nach dem Lauf angelegtes Produkt, an einer Meldung nur ihr Produkt; Übernahme je Produkt mit eigener Zeit, eine wieder
+  vergebene Kennung bekommt einen neuen Eintrag; idempotent). Anweisung „Produkt (Angaben der Material-Verwaltung aus
+  dem Formular, ungeprüft)“, Rückfallwerte „aus dem Formular“; Sperrgrund „Es läuft schon eine Recherche zu „…“
+  (Produktmeldung)“ bzw. „(Name)“. Ein Kontingent und höchstens eine Recherche app-weit für beide Wege. Der Stand eines
+  übernommenen Laufs nennt je Produkt die Zeit seiner Übernahme; „steht im Katalog“ gilt auch für übernommene Vorschläge
+  live.
+- **Routen** (alle nur Material-Verwaltung, ohne Schlüssel Start und Abbrechen 503): `GET/POST /api/material/recherche`,
+  `GET …/recherche/<lauf>`, `POST …/<lauf>/abbrechen`, `GET …/<lauf>/dateien/<n>`, `POST …/<lauf>/anhaengen`,
+  `POST …/<lauf>/verwerfen`.
+- **Journal:** Läufe ohne Meldung unter entity `ki_lauf` („Recherche (Claude API)“; gestartet, beendet, übernommen mit
+  Produkt, Ausführung, übernommenen Feldern und Dateien), am Produkt nur für die Material-Verwaltung; aus einer Meldung
+  weiter unter `recherche`. `JOURNAL_BLEIBT` (dev-bestand-leeren) kennt `ki_lauf`.
+- **Aufräumen und Löschen:** Dateien eines Laufs ohne Meldung 30 Tage nach seinem Ende, sofort bei einem neueren eigenen
+  Lauf ohne Meldung, bei „Verwerfen“ und ohne Konto; bei der Kontolöschung bleiben Eingabe und Vorschlag (C6 A), die
+  Dateien gehen nach dem COMMIT (`recherche.konto_geloescht` / `konto_geloescht_nachher`). `dev-zuruecksetzen` löscht wie bisher alle Läufe der Art.
+- **Doku:** README (Abschnitt „Recherche per Claude API (Materialablage)“, Datenschutz, Verzeichnis der
+  Verarbeitungstätigkeiten, Variablentabelle), `.env.example`, Modulköpfe.
+
+**Tests:** neu `tests/test_material_recherche_reiter.py` (Start ohne Meldung mit Grenzen, E2/E3, 503, ein Lauf und ein
+Kontingent für beide Wege, was hinausgeht, Anweisung und Zusammenführen; eigener Lauf und Verwerfen; Anhängen ohne und
+aus Meldung samt Teilfehler, Wiederholung, wieder vergebener Kennung, zweiter Ausführung, Journal; Aufräumen,
+Kontolöschung, tote Läufe; Rechte je Rolle für alle sieben Routen, `darf.recherche`, Übung; Oberfläche statisch).
+Angepasst: `test_material_ueberblick`, `test_material_stufen`, `test_material_trennung` (Kennung `<lid>`).
+
+### Nachbesserung nach den Prüfungen (22.11.2026)
+
+Auftrag `planung/material-phase4/auftrag_recherche_reiter_nachbesserung.md` nach den Prüfungen Ablauf, Sicherheit und
+Browser.
+
+- **Alter Vorschlag (AB1):** Nach 30 Tagen (Frist der Dateien) zeigt der Reiter einen fertigen oder übernommenen Lauf
+  ohne Meldung nicht mehr – dann steht der Start da und im Reiter „Produkt“ kein Hinweis. Dieselbe Frist wie im
+  Tageslauf (gemeinsame Hilfe), nach der Zeit, nicht nach dem Ordner.
+- **Neuer Start nach „In die Felder übernehmen“ (AB2):** Die übernommenen Werte bleiben, Fundstellen und „Dateien aus
+  der Recherche“ gehen; der Toast sagt „Die Dateien des alten Vorschlags werden nicht mehr angehängt.“ `anhaengen`
+  lehnt einen Lauf, den ein neuerer ersetzt hat, mit 409 ab und bucht ihn nicht als übernommen.
+- **Anhängen (AB3, S2, S4):** 409, wenn die Ausführung schon als anderes Produkt im Katalog steht; ein Produkt stammt
+  aus genau einer Ausführung („Dieses Produkt wurde aus Ausführung n angelegt.“, im Dialog ist die Wahl nach dem ersten
+  Anlegen gesperrt); kommen später Dateien dazu, steht „Recherche nachgeladen“ mit genau diesen im Journal; `nr` und
+  Dateien nur als ganze Zahl.
+- **Keine anlegbare Ausführung mehr (AB4):** Start statt Vorschlag, gleich welcher Status (mit Satz „Alle Ausführungen
+  des Vorschlags vom … stehen schon im Katalog.“).
+- **Vorschlag inzwischen verworfen (AB5):** Antwortet `anhaengen` mit 404 oder 409, fällt die Übernahme weg, das eigene
+  Bild wird hochgeladen und der Dialog sagt „Das Produkt ist angelegt, die Dateien aus der Recherche hängen aber nicht
+  dran: …“; der nächste Klick („Speichern“) schließt.
+- **Journal am Produkt (S1):** Die Läufe ohne Meldung kommen aus dem unveränderlichen Journal (`mat_audit`, „Recherche
+  übernommen“ nennt das Produkt, seit seinem Anlegen) – sie bleiben nach einer Kontolöschung stehen; an Übernahmen nur
+  die dieses Produkts.
+- **Kontolöschung (S3, C6 A):** Eingabe und Vorschlag eines Laufs ohne Meldung bleiben (ohne Personendaten), der Name
+  wird „(gelöschtes Konto)“; nur die Dateien gehen sofort, ein laufender Lauf bricht ab – Kennzeichen in der
+  Transaktion, Ordner und Abbruch erst nach dem COMMIT (`ki.abbruch_kennzeichnen`/`abbruch_melden`). Scheitert die
+  Löschung, bleibt alles stehen. README (Löschung, Verzeichnis der Verarbeitungstätigkeiten) und Löschkonzept angepasst.
+- **Oberfläche:** Reiterleiste auf 344 px einzeilig (kleinerer Innenabstand nur im Produktdialog unter 360 px, O1);
+  Knopfzeile klebt auch am Rechner, solange der Reiter „Recherche“ offen ist (O2); „Verwerfen“ ohne Vorschlag fragt „Die
+  abgebrochene (gescheiterte) Recherche aus dem Reiter nehmen? Sie zählt weiter zum Kontingent.“ ohne `danger` (O3);
+  Teilfehler-Satz, „Fehlendes anhängen“, Fokus auf die Meldung, kein fetter roter Satz mehr (O4); der Hinweis „… ist
+  fertig“ verschwindet nach der Übernahme (O5); „Recherche abbrechen“ (O6); „Recherchieren lassen“ und „Erneut
+  recherchieren“ wie an der Karte (O7); bei aufgebrauchtem Kontingent nur eine Zeile (O8); Häkchen und Beschriftung im
+  Fieldset auf einer Linie, Abstand unter „Verwerfen“ am Telefon, kein Höhensprung zwischen den Reitern (der Dialog hängt
+  oben, wo ein voller Dialog ohnehin stünde; O9).
+- **Bewusst unverändert:** die Datenschutzliste im Startteil bleibt sichtbar (V8), V10, keine Prüfung „Produkt passt
+  zur Ausführung“ (G3 A genügt).
+
+**Tests:** `test_material_recherche_reiter.py` – neu `test_nachbesserung_anhaengen` (S4, AB3, S2 mit „nachgeladen“, S1
+mit geleertem Lauf, Kontolöschung und wieder vergebener Kennung, AB1, AB4, AB2 ohne und mit Meldung);
+`test_aufraeumen_konto_tote` mit laufendem Lauf und künstlich scheiternder Löschung; `test_oberflaeche_statisch` für
+AB2, AB4, AB5, S2 und O1–O9.

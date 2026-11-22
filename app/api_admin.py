@@ -14,6 +14,7 @@ from .material.services import antrag as mat_antrag
 from .material.services import freigaben as mat_freigaben
 from .material.services import journal as mat_journal
 from .material.services import loeschung as mat_loeschung
+from .material.services import recherche as mat_recherche
 from .material.services.rechte import rollen_lesen
 from werkzeug.security import generate_password_hash
 
@@ -321,7 +322,9 @@ def delete_user(uid):
         # Entwürfe, Meldungen und Suchprotokoll ohne Namen – vor dem Löschen, solange der
         # Kontoverweis noch auflösbar ist.
         mat_loeschung.konto_loeschen_vorbereiten(uid)
-        # KI-Läufe (app/ki.py): der Name dessen, der gestartet hat, wird „(gelöschtes Konto)“.
+        # KI-Läufe (app/ki.py): der Name dessen, der gestartet hat, wird „(gelöschtes Konto)“; ein laufender Lauf ohne
+        # Meldung aus dem Produktdialog bekommt das Abbruch-Kennzeichen, seine Dateien gehen nach dem COMMIT (C5/C6 A).
+        ki_ohne_meldung = mat_recherche.konto_geloescht(uid)
         ki.konto_loeschen(uid)
         # Grenzstein im Journal am Konto: users.id wird nach dem Löschen der höchsten Kennung neu vergeben – der
         # Verlauf eines Nachfolgers mit derselben Kennung beginnt nach diesem Eintrag (journal.lesen schneidet an der
@@ -345,8 +348,10 @@ def delete_user(uid):
         # Einführung: der Stand der Übungen (Merker in mat_meta, app/einfuehrung.py) geht ebenso mit.
         einfuehrung.konto_vergessen(uid)
         db.execute("DELETE FROM users WHERE id = ?", (uid,))
-    # Erst nach dem Festschreiben: Bricht die Umschreibung ab, bleibt das Konto samt Bild stehen.
+    # Erst nach dem Festschreiben: Bricht die Umschreibung ab, bleibt das Konto samt Bild (und den Dateien seiner
+    # Recherchen ohne Meldung) stehen.
     delete_avatar(current_app.config["MEDIA_DIR"], bild)
+    mat_recherche.konto_geloescht_nachher(ki_ohne_meldung)
     return jsonify(ok=True, mail=mat_antrag.ohne_verwalter_nach_vorgang())
 
 

@@ -1,7 +1,8 @@
 """Läufe über die Claude API – der gemeinsame Baustein aller Module (Entscheidung des Nutzers vom 21.11.2026).
 
-Zuerst nutzt ihn die Recherche an „Produkt melden“ der Materialablage (material/services/recherche.py), später der
-Artikelentwurf der Strömipedia. Ein Modul bringt seine Anweisung, seine Werkzeuge und seine Prüfungen selbst mit; hier
+Zuerst nutzt ihn die Recherche an „Produkt melden“ der Materialablage (material/services/recherche.py; Bezug
+„mat_meldung:<id>“, seit dem 22.11.2026 auch „mat_katalog“ für Läufe aus dem Produktdialog ohne Meldung – wem so ein
+Lauf gehört, sagt gestartet_von), später der Artikelentwurf der Strömipedia. Ein Modul bringt seine Anweisung, seine Werkzeuge und seine Prüfungen selbst mit; hier
 steht, was für alle gleich ist:
 
   - Client-Fabrik CLIENT (Tests setzen eine Attrappe ein) und verfuegbar(): Die Funktion gibt es nur mit einem
@@ -387,13 +388,27 @@ def starten(art, bezug, eingabe, arbeit, effort="", beendet=None, mit_ordner=Fal
 def abbrechen(lauf_id):
     """Das Abbruch-Kennzeichen setzen (nur an einem laufenden Lauf). Läuft er in diesem Arbeitsprozess, erfährt er es
     sofort, sonst mit dem nächsten Lebenszeichen. Liefert, ob etwas zu tun war."""
-    n = db.execute_zeilen(f"UPDATE ki_laeufe SET abbrechen = 1 WHERE id = ? AND status IN ({_in(LAUFEND)})",
-                          (lauf_id,))
+    n = abbruch_kennzeichnen(lauf_id)
+    if n:
+        abbruch_melden(lauf_id)
+    return n
+
+
+def abbruch_kennzeichnen(lauf_id):
+    """Nur das Abbruch-Kennzeichen (nur an einem laufenden Lauf) – auch in der Transaktion eines Aufrufers, der den Lauf
+    erst nach seinem COMMIT mit abbruch_melden weckt (scheitert die Transaktion, läuft er weiter). Liefert, ob etwas zu
+    tun war."""
+    return bool(db.execute_zeilen(f"UPDATE ki_laeufe SET abbrechen = 1 WHERE id = ? AND status IN ({_in(LAUFEND)})",
+                                  (lauf_id,)))
+
+
+def abbruch_melden(lauf_id):
+    """Nach dem Kennzeichen: Läuft der Lauf in diesem Arbeitsprozess, erfährt er es sofort, sonst mit dem nächsten
+    Lebenszeichen (_puls)."""
     with _LAEUFER_SPERRE:
         lauf = _LAEUFER.get(lauf_id)
-    if n and lauf is not None:
+    if lauf is not None:
         lauf.abbrechen_intern("Abgebrochen.")
-    return bool(n)
 
 
 def leeren(lauf_id):

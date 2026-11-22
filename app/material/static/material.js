@@ -412,6 +412,8 @@
     // Recherche per Claude API an einer Produktmeldung (21.11.2026, entity „recherche“)
     domains: "Herstellerseiten", bemerkung_mit: "Bemerkung mitgeschickt", ki_modell: "Modell (Claude API)",
     effort: "Aufwand", ki_lauf: "Recherche Nr.", belegt: "vorbelegte Felder", produkte: "Produkte",
+    // Recherche im Produktdialog (22.11.2026, „Recherche übernommen“ nach „Anlegen“)
+    ausfuehrung: "Ausführung", felder: "übernommene Felder",
   };
   // Die Beschriftung eines Feldes in einem Journaleintrag – wie beschriftung.feld_name: „description“ ist am Produkt der
   // kurze Zusatz hinter dem Namen und heißt dort seit dem Wunsch vom 18.10.2026 „Bemerkung“; an Ordnern und in den
@@ -462,11 +464,13 @@
                    standard_gesetzt: "Standard-Prüfformular gesetzt", standard_geloest: "Standard-Prüfformular gelöst",
                    // Recherche per Claude API an einer Produktmeldung (21.11.2026)
                    recherche_gestartet: "Recherche gestartet", recherche_beendet: "Recherche beendet",
-                   recherche_uebernommen: "Recherche übernommen" };
+                   recherche_uebernommen: "Recherche übernommen", recherche_nachgeladen: "Recherche nachgeladen" };
   const RECHT = { lesen: "lesen", pruefen: "prüfen", verwalten: "verwalten" };
   const ENTITAET = { item: "Artikel", product: "Produkt", document: "Dokument", form: "Formular", folder: "Ordner",
                      category: "Kategorie", user: "Konto", inspection: "Prüfung", round: "Durchgang", request: "Produktmeldung",
-                     formular: "Prüfformular", recherche: "Recherche (Claude API)" };
+                     formular: "Prüfformular", recherche: "Recherche (Claude API)",
+                     // Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog, 22.11.2026) – Kennung des Laufs
+                     ki_lauf: "Recherche (Claude API)" };
 
   /* Warum hier nicht geprüft werden kann – als HTML. obj: der Ordner, Artikel oder die Prüfung (mit „darf“); ohne obj
      gilt die Frage für das ganze Konto (Seite „Prüfungen“). Prüfen braucht seit Phase 2 dreierlei: das Häkchen
@@ -2265,8 +2269,9 @@
           <div class="mat-bildwahl-name" id="${id}-name" aria-live="polite"></div>
           <div class="help" id="${id}-hilfe">${esc(hinweis)}<span class="mat-nur-maus"> Die Datei lässt sich auch hierher ziehen.</span></div>
         </div></div>`;
-  // Liefert die Auswahl als { datei: File | null, entfernen: bool } – gelesen erst beim Speichern.
-  function fotoFeldVerdrahten(dlg, body, id) {
+  // Liefert die Auswahl als { datei: File | null, entfernen: bool } – gelesen erst beim Speichern. beiWahl(): wenn ein
+  // Foto gewählt ist (Reiter „Recherche“: das eigene Bild gewinnt, dessen Häkchen geht aus).
+  function fotoFeldVerdrahten(dlg, body, id, beiWahl) {
     const feld = $(`#${id}-feld`, body);
     const eingabe = $(`#${id}`, body);
     const { wort, bisher } = feld.dataset;
@@ -2300,6 +2305,7 @@
       wahl.datei = f;
       wahl.entfernen = false;
       zeichnen();
+      if (beiWahl) beiWahl();
     }
     // Den Wert gleich leeren: So löst dieselbe Datei nach „Auswahl entfernen“ wieder ein change aus.
     eingabe.addEventListener("change", () => { nehmen(eingabe.files[0]); eingabe.value = ""; });
@@ -4914,12 +4920,47 @@
     };
   }
 
+  /* Fundstellen unter den Feldern aus produktFelderHtml NACH dem Zeichnen (Reiter „Recherche“, „In die Felder
+     übernehmen“) – wie opt.quelle beim Zeichnen: .help.mat-fundstelle unter dem Feld (unter seiner Hilfe, wenn sie
+     daneben steht), vom Feld per aria-describedby vorgelesen. quellen: {Feld: fertiges HTML}; ein Feld ohne Eintrag
+     verliert seine Fundstelle. */
+  function produktFeldQuellen(body, quellen) {
+    Object.entries(PRODUKT_FELD_ID).forEach(([k, id]) => {
+      const el = $(`#${id}`, body);
+      if (!el) return;
+      const qid = `${id}-quelle`;
+      let q = $(`#${qid}`, body);
+      const zu = (el.getAttribute("aria-describedby") || "").split(/\s+/).filter((x) => x && x !== qid);
+      if (!quellen[k]) {
+        if (q) q.remove();
+      } else {
+        if (!q) {
+          q = document.createElement("div");
+          q.className = "help mat-fundstelle";
+          q.id = qid;
+          const hilfe = $(`#${id}-hilfe`, body);
+          (hilfe && hilfe.parentNode === el.parentNode ? hilfe : el).after(q);
+        }
+        q.innerHTML = quellen[k];
+        zu.push(qid);
+      }
+      if (zu.length) el.setAttribute("aria-describedby", zu.join(" "));
+      else el.removeAttribute("aria-describedby");
+    });
+  }
+
   /* opt.danach (Phase 2 · L3, „Im Katalog anlegen“ aus der Nacharbeit): Nach dem Anlegen bleibt die Seite stehen und
      danach(produkt) ordnet das neue Produkt zu – sonst geht es wie bisher zur Produktseite. */
   async function produktDialog(p, opt) {
     opt = opt || {};
-    const kats = await kategorienLaden();
     const neu = !p.id;
+    const mitReiter = !opt.danach;
+    /* Der dritte Reiter „Recherche“ (22.11.2026, rechercheReiter): nur für die Material-Verwaltung mit API-Schlüssel
+       (DARF.recherche – in der Übung fehlt das Feld) und nur, wenn ein Produkt neu in den Katalog kommt: „Produkt
+       anlegen“ und „Produkt aus Meldung anlegen“ (A1 A), nicht bei Bearbeiten, Variante und Nacharbeit (A2 A). Der Stand
+       der Recherche kommt gleich mit den Kategorien, damit der Hinweis im Reiter „Produkt“ ohne Sprung dasteht. */
+    const mitRecherche = mitReiter && Boolean(DARF.recherche) && !p.id && !p.variante_von;
+    const [kats, rsStand] = await Promise.all([kategorienLaden(), mitRecherche ? rechercheStandLaden(p) : null]);
     // Als Variante: die aktuellen Dokumente des Vorbilds (neueste Version, nicht zurückgezogen) zur Auswahl.
     const vorbildDoks = p.variante_von ? p.variante_von.dokumente.filter((d) => !d.abgeloest_durch && (!d.withdrawn_on || d.withdrawn_on > isoHeute(0))) : [];
     /* Zwei Reiter: „Produkt“ (die Felder) und „Bestandteile“ (die Bestandteil-Liste, Schritt 25 – nur Bezeichnung und
@@ -4927,11 +4968,12 @@
        aus einer Meldung) geht die Liste in derselben Anfrage mit – scheitert eine Position, entsteht nichts und die
        Position ist markiert; beim Bearbeiten erst das Produkt, dann die Liste als Ganzes (PUT …/bestandteile), wenn sie
        sich geändert hat. Nicht in der Nacharbeit (opt.danach). */
-    const mitReiter = !opt.danach;
-    const formular = `${p.variante_von ? `<p class="help">Die Stammdaten sind übernommen – bitte die neue Artikelnummer eintragen und anpassen, was sich unterscheidet.${(p.bestandteile || []).length ? " Die Bestandteile stehen im Reiter „Bestandteile“." : ""}</p>` : ""}
+    const formular = `${mitRecherche ? '<p class="notice mat-rs-hinweis" id="pd-rs-hinweis" hidden></p>' : ""}
+      ${p.variante_von ? `<p class="help">Die Stammdaten sind übernommen – bitte die neue Artikelnummer eintragen und anpassen, was sich unterscheidet.${(p.bestandteile || []).length ? " Die Bestandteile stehen im Reiter „Bestandteile“." : ""}</p>` : ""}
       ${p.meldung ? meldeKasten(p.meldung) : ""}
       ${produktFelderHtml(p, kats)}
       ${fotoFeld("pd-bild", "Produktbild", "Bild", p.bild ? p.vorschau || p.bild : "", "JPEG, PNG, WebP oder HEIC vom Telefon.")}
+      ${mitRecherche ? '<div id="pd-rs-dateien"></div>' : ""}
       ${p.variante_von ? `<fieldset class="mat-variante-doks"><legend>Dokumente übernehmen</legend>
         ${vorbildDoks.length ? vorbildDoks.map((d) => `<label class="inline"><input type="checkbox" class="pd-dok" value="${d.id}" checked> ${esc(d.title)}
           <span class="muted small">${esc(DOKART[d.kind] || d.kind)}${d.version ? `, ${esc(d.version)}` : ""}${d.datei ? "" : " · Link"}</span></label>`).join("") : '<p class="help">Das Produkt hat keine aktuellen Dokumente.</p>'}
@@ -4943,9 +4985,11 @@
     dialog(mitReiter ? `<h2 id="pd-titel">${titel}</h2>
       <div class="c-tabs reiter-linie mat-reiter" role="tablist" aria-labelledby="pd-titel">
         <button type="button" role="tab" id="pd-reiter-produkt" aria-controls="pd-teil-produkt" data-reiter="produkt">Produkt</button>
-        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button></div>
+        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button>${mitRecherche ? `
+        <button type="button" role="tab" id="pd-reiter-recherche" aria-controls="pd-teil-recherche" data-reiter="recherche">Recherche</button>` : ""}</div>
       <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-produkt" aria-labelledby="pd-reiter-produkt">${formular}</div>
-      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>
+      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>${mitRecherche ? `
+      <div class="mat-reiter-teil mat-rs-vorschlag" role="tabpanel" id="pd-teil-recherche" aria-labelledby="pd-reiter-recherche" hidden></div>` : ""}
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="pd-ok" type="button">${neu ? "Anlegen" : "Speichern"}</button></div>`
       : `<h2>${titel}</h2>${formular}
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="pd-ok" type="button">${neu ? "Anlegen" : "Speichern"}</button></div>`,
@@ -4953,16 +4997,23 @@
       // Neu in einer Kategorie: deren Vorgaben übernehmen – nicht bei einer Variante, die hat ihre eigenen.
       const felder = produktFelderVerdrahten(body, kats, { neu, ausser: p.id, vorgaben: neu && p.category_id && !p.variante_von });
       if (p.id && !p.variante_von) verschiebenFolgen($("#pd-kat", body), $("#pd-folgen", body), (wert) => `produkt=${p.id}&kategorie=${wert}`, p.category_id);
-      const bildWahl = fotoFeldVerdrahten(dlg, body, "pd-bild");
+      let rs = null;                 // der Reiter „Recherche“ (rechercheReiter)
+      const bildWahl = fotoFeldVerdrahten(dlg, body, "pd-bild", () => { bildHoch = false; if (rs) rs.eigenesBild(); });
       // Die Bestandteil-Liste und die Reiter (Start „Produkt“, „Bestandteile bearbeiten“ öffnet „Bestandteile“); die
-      // Variante übernimmt die Liste des Vorbilds zum Bearbeiten.
+      // Variante übernimmt die Liste des Vorbilds zum Bearbeiten. Der Reiter „Recherche“ liest bei jedem Wechsel dorthin
+      // die Felder des Reiters „Produkt“.
       const stueck = mitReiter ? stuecklisteEditor($("#pd-teil-bestandteile", body), p) : null;
-      const reiterZeigen = mitReiter ? reiterSchalten(body, opt.reiter === "bestandteile" ? "bestandteile" : "produkt") : null;
+      const reiterZeigen = mitReiter ? reiterSchalten(body, opt.reiter === "bestandteile" ? "bestandteile" : "produkt",
+        (name) => { if (rs && name === "recherche") rs.zeigen(); }) : null;
+      if (mitRecherche) rs = rechercheReiter({ dlg, body, p, kats, felder, reiterZeigen, bildWahl, stand: rsStand });
       // Erst die Angaben (ein neues Produkt samt Bestandteil-Liste), dann das Bild. Scheitert nur das Bild, kennt der
       // Dialog das Produkt schon: Ein zweiter Klick speichert die Angaben erneut und lädt das Bild nach, statt das Produkt
       // doppelt anzulegen. Beim Bearbeiten geht die Liste nach dem Produkt an den Server; scheitert sie, bleibt der Dialog
-      // im Reiter „Bestandteile“.
+      // im Reiter „Bestandteile“. Mit „In die Felder übernehmen“ (Reiter „Recherche“) hängen danach die gewählten Dateien
+      // aus der Recherche an (3.4: erst Angaben, dann Dateien, dann ein eigenes Bild); fehlt eine, bleibt der Dialog offen
+      // und ein zweiter Klick hängt nur an, was fehlt.
       let pid = p.id || null;
+      let bildHoch = false;          // das eigene Bild ist schon oben (zweiter Klick nach einem Teilfehler)
       $("#pd-ok", body).onclick = async (ev) => {
         const knopf = ev.currentTarget;
         const daten = felder.daten();
@@ -4997,12 +5048,21 @@
             catch (e) { stueck.fehlerZeigen(e.message); reiterZeigen("bestandteile"); throw e; }
           }
           if (mitReiter) stueck.gespeichert();
-          if (bild) {
+          const anhang = rs ? await rs.anhaengen(pid, Boolean(bild)) : null;
+          if (bild && !bildHoch) {
             const fd = new FormData();
             fd.append("file", bild);
             await api(`${API}/produkte/${pid}/bild`, { method: "POST", body: fd });
+            bildHoch = true;
           } else if (bildWahl.entfernen) {
             await api(`${API}/produkte/${pid}/bild`, { method: "DELETE" });
+          }
+          // Teilfehler (O4): Das Produkt steht, der Dialog bleibt offen – die Hauptaktion hängt nur noch an, was fehlt.
+          // Abgelehnt (AB5): Satz im Reiter „Produkt“, der nächste Klick speichert nur noch die Angaben.
+          if (anhang && (anhang.fehler.length || anhang.abgelehnt)) {
+            knopf.textContent = anhang.fehler.length ? "Fehlendes anhängen" : "Speichern";
+            knopf.disabled = false;
+            return;
           }
           dlg.close();
           if (opt.danach) await opt.danach(r.produkt);
@@ -5013,8 +5073,9 @@
   }
 
   /* Reiter in einem Dialog (role tablist/tab/tabpanel wie „Ordner bearbeiten“; ← und → wechseln, Pos1 und Ende
-     springen). Die Teile tragen aria-labelledby auf ihren Reiter. Liefert zeigen(name, fokusReiter). */
-  function reiterSchalten(body, start) {
+     springen). Die Teile tragen aria-labelledby auf ihren Reiter. Liefert zeigen(name, fokusReiter). beimZeigen(name):
+     nach jedem Wechsel (Reiter „Recherche“ liest dann die Felder des Reiters „Produkt“). */
+  function reiterSchalten(body, start, beimZeigen) {
     const reiter = $$('[role="tab"]', body);
     let aktiv = null;
     function zeigen(name, fokusReiter) {
@@ -5028,6 +5089,7 @@
         const teil = $(`#${t.getAttribute("aria-controls")}`, body);
         if (teil) teil.hidden = !an;
       });
+      if (beimZeigen) beimZeigen(name);
     }
     reiter.forEach((t) => t.addEventListener("click", () => zeigen(t.dataset.reiter)));
     $('[role="tablist"]', body).addEventListener("keydown", (e) => {
@@ -8596,14 +8658,24 @@
   }
   const dateiHerkunft = (f) => (f.quelle === "webarchiv" ? `Webarchiv${f.stand ? `, Stand ${esc(fmtTag(f.stand))}` : ""}` : f.quelle === "hersteller" ? "Hersteller" : "fremde Seite");
   const dateiArt = (f) => [f.art, ...(f.auch_als || [])].map((a) => esc(DOKART[a] || a)).join(", ");
-  function dateiZeile(m, f) {
+  // dateiUrl(n): die Adresse der Datei n des Vorschlags (an der Meldung bzw. am Lauf ohne Meldung).
+  function dateiZeile(dateiUrl, f) {
     return `<tr><td data-l="Datei" class="mat-k-titel"><strong>${esc(f.titel)}</strong><div class="small muted">${dateiArt(f)}${f.sprache ? ` · ${esc(f.sprache)}` : ""}</div>
         <div class="small mat-vs-adresse">${fremdLink(f.url)}</div></td>
       <td data-l="Version">${esc(f.version || "")}</td><td data-l="Gültig ab">${esc(fmtTag(f.gueltig_ab) || "")}</td>
       <td data-l="Größe">${f.datei ? `${esc(groesse(f.groesse))}${f.seiten ? ` · ${esc(plural(f.seiten, "Seite", "Seiten"))}` : ""}` : ""}</td>
       <td data-l="Herkunft">${dateiHerkunft(f)}</td><td data-l="Prüfung">${dateiPruefung(f)}</td>
-      <td class="tabelle-aktionen">${f.datei ? `<a class="btn secondary small" href="${esc(rechercheDatei(m, f.n))}" target="_blank" rel="noopener" aria-label="${esc(`${f.titel} öffnen`)}">Öffnen</a>` : ""}</td></tr>`;
+      <td class="tabelle-aktionen">${f.datei ? `<a class="btn secondary small" href="${esc(dateiUrl(f.n))}" target="_blank" rel="noopener" aria-label="${esc(`${f.titel} öffnen`)}">Öffnen</a>` : ""}</td></tr>`;
   }
+
+  // Bausteine, die „Vorschlag ansehen“ und der Reiter „Recherche“ im Produktdialog teilen: die Tabelle „Gemeinsam“, die
+  // Tabelle einer Ausführung, die Dateien, Hinweise und Rückfragen.
+  const gemeinsamTabelle = (v, kats, je) => vorschlagTabelle(GEMEINSAME_FELDER.map((k) => (je.includes(k) ? vorschlagZeile(k, null, kats, '<span class="muted">je Ausführung, siehe unten</span>') : v.gemeinsam[k] ? vorschlagZeile(k, v.gemeinsam[k], kats) : "")).join(""));
+  const ausfuehrungTabelle = (a, kats, je) => vorschlagTabelle(["article_no", "description", ...je].filter((k) => a.felder[k]).map((k) => vorschlagZeile(k, a.felder[k], kats)).join(""));
+  const dateienTabelle = (v, dateiUrl) => (v.dateien.length ? `<table class="list mat-vs-tabelle mat-vs-dateien"><thead><tr><th scope="col">Datei</th><th scope="col">Version</th><th scope="col">Gültig ab</th><th scope="col">Größe</th><th scope="col">Herkunft</th><th scope="col">Prüfung</th><th scope="col"><span class="nur-vorlesen">Aktion</span></th></tr></thead>
+        <tbody>${v.dateien.map((f) => dateiZeile(dateiUrl, f)).join("")}</tbody></table>` : leer("Keine Dateien gefunden."));
+  const vorschlagListen = (v) => `${v.hinweise.length ? `<h3>Hinweise</h3><ul class="mat-vs-liste">${v.hinweise.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+      ${v.rueckfragen.length ? `<h3>Rückfragen an den Hersteller</h3><ul class="mat-vs-liste">${v.rueckfragen.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}`;
 
   async function vorschlagDialog(m, danach) {
     let d, kats;
@@ -8622,7 +8694,7 @@
       return `<section class="mat-vs-ausf"><div class="mat-vs-ausf-kopf"><div><h4>Ausführung ${a.nr}${nr ? `: <span class="mat-ganz">${esc(nr)}</span>` : ""}</h4>
         ${a.im_katalog ? `<p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}">${esc(a.im_katalog.name)}</a>.</p>` : ""}</div>
         ${bild && bild.datei ? `<a class="mat-vs-bild" href="${esc(rechercheDatei(m, bild.n))}" target="_blank" rel="noopener"><img src="${esc(rechercheDatei(m, bild.n))}" alt="${esc(`Bild ${nr || `der Ausführung ${a.nr}`}`)}" loading="lazy"></a>` : ""}</div>
-        ${vorschlagTabelle(["article_no", "description", ...je].filter((k) => a.felder[k]).map((k) => vorschlagZeile(k, a.felder[k], kats)).join(""))}</section>`;
+        ${ausfuehrungTabelle(a, kats, je)}</section>`;
     };
     // V1: Nichts anlegbar an einer offenen Meldung – ein Satz mit dem Weg; V5: „Fehlendes nachladen“ nur, wenn etwas fehlt.
     const nichts = r.status === "fertig" && m.status === "offen" && !anlegbar.length;
@@ -8632,14 +8704,12 @@
       ${r.status === "uebernommen" ? `<p>Übernommen: ${(r.produkte || []).length ? produktLinks(r.produkte) : '<span class="muted">Produkte inzwischen gelöscht</span>'}</p>` : ""}
       ${v.ausweichmodell ? `<p class="notice">Geantwortet hat auch das Ausweichmodell ${esc(v.ausweichmodell)} – die Kosten sind nur geschätzt.</p>` : ""}
       <h3>Gemeinsam</h3>
-      ${vorschlagTabelle(GEMEINSAME_FELDER.map((k) => (je.includes(k) ? vorschlagZeile(k, null, kats, '<span class="muted">je Ausführung, siehe unten</span>') : v.gemeinsam[k] ? vorschlagZeile(k, v.gemeinsam[k], kats) : "")).join(""))}
+      ${gemeinsamTabelle(v, kats, je)}
       <h3>Ausführungen</h3>
       ${v.ausfuehrungen.length ? v.ausfuehrungen.map(ausfuehrung).join("") : leer("Keine Ausführung gefunden.")}
       <h3>Dateien</h3>
-      ${v.dateien.length ? `<table class="list mat-vs-tabelle mat-vs-dateien"><thead><tr><th scope="col">Datei</th><th scope="col">Version</th><th scope="col">Gültig ab</th><th scope="col">Größe</th><th scope="col">Herkunft</th><th scope="col">Prüfung</th><th scope="col"><span class="nur-vorlesen">Aktion</span></th></tr></thead>
-        <tbody>${v.dateien.map((f) => dateiZeile(m, f)).join("")}</tbody></table>` : leer("Keine Dateien gefunden.")}
-      ${v.hinweise.length ? `<h3>Hinweise</h3><ul class="mat-vs-liste">${v.hinweise.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
-      ${v.rueckfragen.length ? `<h3>Rückfragen an den Hersteller</h3><ul class="mat-vs-liste">${v.rueckfragen.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+      ${dateienTabelle(v, (n) => rechercheDatei(m, n))}
+      ${vorschlagListen(v)}
       ${nichts ? '<p class="notice">Alle Ausführungen stehen schon im Katalog – es gibt nichts anzulegen. Nutze „Vorhandenes zuordnen“ an der Meldung.</p>' : ""}
       ${r.status === "uebernommen" ? `<p class="help">${fehlt ? `${esc(plural(r.fehlt, "gewählte Datei hängt", "gewählte Dateien hängen"))} noch nicht am Produkt.` : "Alle gewählten Dateien sind angehängt."}</p>` : ""}</div>
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Schließen</button>${fehlt ? '<button class="btn secondary" id="vs-nach" type="button">Fehlendes nachladen</button>' : ""}${geht ? `<button class="btn" id="vs-anlegen" type="button">${anlegbar.length === 1 ? "Produkt anlegen" : "Produkte anlegen"}</button>` : ""}</div>`,
@@ -8847,6 +8917,399 @@
       else document.getElementById("dlg").close();
       await danach();
     } catch (e) { S.fehlschlag(knopf, e, body); }
+  }
+
+  /* --- Reiter „Recherche“ im Produktdialog (22.11.2026; entwurf_recherche_reiter_produkt.md, „Alles Empfehlung“) -----
+     Nur für die Material-Verwaltung mit API-Schlüssel (DARF.recherche) in „Produkt anlegen“ und „Produkt aus Meldung
+     anlegen“. Ohne Meldung recherchiert er mit den Angaben aus dem Reiter „Produkt“ (gelesen bei jedem Wechsel hierher,
+     B1 A) und zeigt den jüngsten eigenen Lauf (GET /recherche, C1 A); aus einer Meldung liest und startet er über deren
+     Routen – ein Lauf für Karte und Reiter (E1 A), mit den Häkchen für Fotos und Bemerkung wie im Startdialog. Läuft er,
+     fragt der Reiter alle 5 s nach (nur bei offenem Dialog und sichtbarer Seite), schließen lässt er sich trotzdem (F2 A).
+     Fertig: die Bausteine von „Vorschlag ansehen“ mit einem Optionsfeld je Ausführung (D3 A) und „In die Felder
+     übernehmen“ (D1 A): Werte mit „vorbelegt“ überschreiben die Felder (D2 A), die Fundstelle steht darunter, unter dem
+     Bildfeld erscheint „Dateien aus der Recherche“ (D4 A). Die Knöpfe hier sind grau – „Anlegen“ in der Knopfzeile
+     bleibt die eine Hauptaktion (A4 A); nach dem Anlegen hängt anhaengen() die gewählten Dateien an. */
+  function rechercheStandLaden(p) {
+    const url = p.meldung ? rechercheUrl(p.meldung) : `${API}/recherche?${new URLSearchParams({ hersteller: p.manufacturer || "" })}`;
+    return api(url).catch(() => null);         // ohne Antwort zeigt der Reiter den Satz und lädt beim Wechsel neu
+  }
+  // Fehler 400 beim Start, die ein Feld des Reiters „Produkt“ meinen (Texte aus services.text und katalog.beschreibung).
+  const RS_FELD_FEHLER = [["Hersteller", "pd-her"], ["Modell", "pd-mod"], ["Artikelnummer", "pd-art"], ["Norm", "pd-norm"],
+                          ["Kategorie", "pd-kat"], ["Bemerkung", "pd-desc"]];
+  const RS_FELDER = ["category_id", "manufacturer", "model", "article_no", "description", "material_kind", "norm",
+                     "interval_months", "lifetime_years", "lifetime_source"];
+  function rechercheReiter(o) {
+    const { dlg, body, p, kats, felder, reiterZeigen, bildWahl } = o;
+    const teil = $("#pd-teil-recherche", body);
+    const m = p.meldung || null;
+    const url = {
+      lesen: (her) => (m ? rechercheUrl(m) : `${API}/recherche?${new URLSearchParams({ hersteller: her || "" })}`),
+      starten: () => (m ? rechercheUrl(m) : `${API}/recherche`),
+      stand: (r) => (m ? rechercheUrl(m) : `${API}/recherche/${r.id}`),
+      abbrechen: (r) => (m ? rechercheUrl(m, "/abbrechen") : `${API}/recherche/${r.id}/abbrechen`),
+      datei: (r, n) => (m ? rechercheDatei(m, n) : `${API}/recherche/${r.id}/dateien/${n}`),
+    };
+    let d = o.stand;                 // {recherche, moeglich, start} – null: nicht geladen
+    let geladenFuer = p.manufacturer || "";
+    let domains = null;              // Eingabe im Feld „Herstellerseite“ – null: der Vorschlag des Servers
+    const haken = { fotos: false, bemerkung: false };
+    let nr = null;                   // gewählte Ausführung
+    let neuOffen = false;            // „Erneut recherchieren“ unter dem Vorschlag aufgeklappt
+    let hinweis = null;              // E3: zum Produkt gibt es eine offene Meldung (Antwort des Starts)
+    let startFehler = null;          // {text, produkt}: 409 (auch E2), 429, 503 beim Start
+    let gestartet = "";              // Name des Produkts beim Start (für den Toast am Ende)
+    let uebernahme = null;           // {lauf, a, felder} nach „In die Felder übernehmen“
+    let fest = null;                 // Ausführung, aus der das Produkt schon angelegt ist (S2: danach keine andere)
+    let nachfrage = null;
+    const aus = new AbortController();
+    dlg.addEventListener("close", () => { aus.abort(); clearTimeout(nachfrage); }, { once: true });
+    // Offen heißt: derselbe Dialog steht noch da (S.dialog ersetzt sonst den Inhalt von #dlg).
+    const offen = () => dlg.open && body.contains(teil);
+    const lauf = () => (d ? d.recherche : null);
+    function angaben() {
+      if (m) return { manufacturer: m.manufacturer || "", model: m.model || "", article_no: m.article_no || "" };
+      const x = felder.daten();
+      return { manufacturer: (x.manufacturer || "").trim(), model: (x.model || "").trim(), article_no: (x.article_no || "").trim(),
+               norm: x.norm || "", category_id: x.category_id || null, description: x.description || "" };
+    }
+    const laufName = () => {
+      const e = lauf() && lauf().eingabe && lauf().eingabe.meldung;
+      return e ? `${e.hersteller} ${e.modell}` : gestartet || `${angaben().manufacturer} ${angaben().model}`.trim();
+    };
+    const anlegbar = (r) => (r && r.vorschlag ? r.vorschlag.ausfuehrungen.filter((a) => a.anlegbar) : []);
+
+    function startHtml(r) {
+      const s = d.start;
+      if (!s) return '<p>Die Recherche ist gerade nicht eingerichtet.</p>';
+      const x = angaben();
+      const name = `${x.manufacturer} ${x.model}`.trim();
+      const grund = !m && (!x.manufacturer || !x.model) ? "Bitte zuerst im Reiter „Produkt“ Hersteller und Modell eintragen."
+        : startFehler ? startFehler.text : d.moeglich && !d.moeglich.an ? d.moeglich.grund : "";
+      const herkunft = (s.domains_aus_links || []).length;
+      // Ist das Kontingent selbst der Sperrgrund („Kontingent für … aufgebraucht“), steht nur dieser Satz da.
+      const kontingent = d.moeglich && !(grund && grund === d.moeglich.grund && !d.moeglich.rest && grund.startsWith("Kontingent"));
+      return `${r && r.vorschlag && anlegbar(r).length ? `<p>Die neue Recherche ersetzt den Vorschlag vom ${esc(fmtZeit(r.gestartet_am))}.</p>` : ""}
+        <p>${m ? "Recherchiert wird die Meldung" : "Recherchiert wird"}: ${name ? `<strong>${esc(name)}</strong>${x.article_no ? ` <span class="mat-ganz">(${esc(x.article_no)})</span>` : ""}` : '<span class="muted">noch ohne Hersteller und Modell</span>'}</p>
+        <label for="pd-rs-domains">Herstellerseite</label>
+        <input type="text" id="pd-rs-domains" value="${esc(domains !== null ? domains : s.domains.join(", "))}" ${TASTATUR_ADRESSE} aria-describedby="pd-rs-domains-hilfe${herkunft ? " pd-rs-domains-herkunft" : ""}">
+        <div class="help" id="pd-rs-domains-hilfe">Eine bis drei Domains, durch Komma getrennt, z. B. hersteller.de. Nur dort ruft Claude Seiten ab und lädt der Server Dateien.</div>
+        ${herkunft ? `<p class="help mat-recherche-herkunft" id="pd-rs-domains-herkunft">Aus einem Link der Meldung: ${s.domains_aus_links.map((y) => `<span class="mat-ganz">${esc(y)}</span>`).join(", ")} – bitte prüfen, ob die Seite wirklich dem Hersteller gehört.</p>` : ""}
+        ${m && s.fotos ? `<label class="inline"><input type="checkbox" id="pd-rs-fotos"${haken.fotos ? " checked" : ""}> ${esc(plural(s.fotos, "Foto", "Fotos"))} mitschicken</label>` : ""}
+        ${m && s.bemerkung ? `<div class="mat-feldkopf">Bemerkung des Melders</div><p class="mat-text mat-recherche-bemerkung">${esc(s.bemerkung)}</p>
+          <label class="inline"><input type="checkbox" id="pd-rs-bemerkung"${haken.bemerkung ? " checked" : ""}> Bemerkung mitschicken</label>` : ""}
+        ${datenschutzHtml(s.datenschutz)}
+        ${kontingent ? `<p class="help">Kontingent: noch ${d.moeglich.rest} von ${d.moeglich.grenze} in diesem Monat.</p>` : ""}
+        ${grundSatz("pd-rs-grund", grund)}
+        ${startFehler && startFehler.produkt ? `<p class="help"><a href="/materialablage/katalog/produkt/${startFehler.produkt.id}" target="_blank" rel="noopener">${esc(startFehler.produkt.name)} öffnen</a></p>` : ""}
+        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-los"${knopfAus("pd-rs-grund", grund)}>${r && !r.vorschlag ? "Erneut recherchieren" : "Recherchieren lassen"}</button></div>`;
+    }
+    const verwerfenKnopf = () => (m ? "" : ' <button type="button" class="lnk" id="pd-rs-verwerfen">Verwerfen</button>');
+    function laufHtml(r) {
+      return `<p class="mat-recherche-zeile"><span class="mat-recherche-stand" role="status" tabindex="-1">${esc(rechercheStand(r))}</span>
+          <button type="button" class="lnk" id="pd-rs-abbrechen">Recherche abbrechen</button></p>
+        <p class="help">Die Recherche läuft weiter, wenn du den Dialog schließt – du findest sie hier wieder.</p>`;
+    }
+    function endeHtml(r) {
+      const grund = r.status === "abgebrochen" && (!r.fehler || r.fehler === "Abgebrochen.") ? "." : `: <span class="mat-text">${esc(r.fehler || "ohne Angabe")}</span>`;
+      return `<p class="mat-recherche-zeile"><span>${rechercheVom(r)}${rechercheKosten(r)} – ${r.status === "abgebrochen" ? "abgebrochen" : "gescheitert"}${grund}</span>${verwerfenKnopf()}</p>`;
+    }
+    function vorschlagHtml(r) {
+      const v = r.vorschlag, e = r.eingabe || {};
+      const je = jeAusfuehrung(v);
+      const frei = anlegbar(r);
+      // D3 A: vorgewählt die Ausführung mit der Artikelnummer aus dem Reiter „Produkt“, sonst die erste anlegbare. Ist
+      // das Produkt schon angelegt (Teilfehler), bleibt seine Ausführung gewählt und die anderen sind gesperrt (S2).
+      if (fest !== null) nr = fest;
+      else if (!frei.some((a) => a.nr === nr)) {
+        const eigen = vergleichbar(angaben().article_no);
+        nr = ((eigen && frei.find((a) => vergleichbar(a.felder.article_no && a.felder.article_no.wert) === eigen)) || frei[0] || {}).nr || null;
+      }
+      const ausfuehrung = (a) => {
+        const bild = a.bild ? v.dateien.find((f) => f.n === a.bild) : null;
+        const anr = a.felder.article_no && a.felder.article_no.wert;
+        return `<section class="mat-vs-ausf${a.anlegbar ? "" : " nicht"}"><div class="mat-vs-ausf-kopf"><div>
+          <label class="inline mat-rs-wahl"><input type="radio" name="pd-rs-nr" value="${a.nr}"${a.nr === nr ? " checked" : ""}${(fest === null ? a.anlegbar : a.nr === fest) ? "" : " disabled"}> Ausführung ${a.nr}${anr ? `: <span class="mat-ganz">${esc(anr)}</span>` : ""}</label>
+          ${a.im_katalog ? `<p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}" target="_blank" rel="noopener">${esc(a.im_katalog.name)}</a>.</p>` : ""}</div>
+          ${bild && bild.datei ? `<a class="mat-vs-bild" href="${esc(url.datei(r, bild.n))}" target="_blank" rel="noopener"><img src="${esc(url.datei(r, bild.n))}" alt="${esc(`Bild ${anr || `der Ausführung ${a.nr}`}`)}" loading="lazy"></a>` : ""}</div>
+          ${ausfuehrungTabelle(a, kats, je)}</section>`;
+      };
+      const grund = frei.length || fest !== null ? "" : "Alle Ausführungen stehen schon im Katalog – es gibt nichts zu übernehmen.";
+      return `<p class="small muted mat-rs-kopf">Vorschlag vom <span class="name-einheit">${esc(fmtZeit(r.gestartet_am))}${r.von ? ` (${person(r.von)})` : ""}</span>${rechercheKosten(r)}${(e.domains || []).length ? ` · Herstellerseite ${esc(e.domains.join(", "))}` : ""}${verwerfenKnopf()}</p>
+        ${r.status === "uebernommen" && (r.produkte || []).length ? `<p>Daraus angelegt: ${produktLinks(r.produkte)}</p>` : ""}
+        ${fest !== null ? `<p class="help">Das Produkt ist aus Ausführung ${fest} angelegt – die Wahl bleibt.</p>` : m && frei.length > 1 ? "<p class=\"help\">Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung.</p>" : ""}
+        ${v.ausweichmodell ? `<p class="notice">Geantwortet hat auch das Ausweichmodell ${esc(v.ausweichmodell)} – die Kosten sind nur geschätzt.</p>` : ""}
+        <h3>Gemeinsam</h3>
+        ${gemeinsamTabelle(v, kats, je)}
+        <h3 id="pd-rs-ausf-titel">Ausführungen</h3>
+        <div role="radiogroup" aria-labelledby="pd-rs-ausf-titel">${v.ausfuehrungen.length ? v.ausfuehrungen.map(ausfuehrung).join("") : leer("Keine Ausführung gefunden.")}</div>
+        <h3>Dateien</h3>
+        ${dateienTabelle(v, (n) => url.datei(r, n))}
+        ${vorschlagListen(v)}
+        ${grundSatz("pd-rs-ue-grund", grund)}
+        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-uebernehmen"${knopfAus("pd-rs-ue-grund", grund)}>In die Felder übernehmen</button></div>
+        <p class="mat-rs-neu"><button type="button" class="lnk" id="pd-rs-neu" aria-expanded="${neuOffen}" aria-controls="pd-rs-startteil">Erneut recherchieren</button></p>
+        <div id="pd-rs-startteil"${neuOffen ? "" : " hidden"}>${startHtml(r)}</div>`;
+    }
+
+    function zeichnen() {
+      if (!d) {
+        teil.innerHTML = '<p>Der Stand der Recherche ließ sich nicht laden.</p><div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-laden">Erneut laden</button></div>';
+        $("#pd-rs-laden", teil).onclick = () => zeigen(true);
+        hinweisZeigen();
+        return;
+      }
+      const r = lauf();
+      const oben = hinweis ? `<p class="notice">${esc(hinweis.text)} <a href="/materialablage/katalog/meldungen" target="_blank" rel="noopener">Zu den Produktmeldungen</a></p>` : "";
+      // AB4 (3.4): Gibt es keine anlegbare Ausführung mehr (alle stehen im Katalog), steht der Startteil da, gleich in
+      // welchem Status – über ihm ein Satz, warum. Ein Vorschlag ganz ohne Ausführung bleibt stehen.
+      const nichtsMehr = r && r.vorschlag && r.vorschlag.ausfuehrungen.length && !anlegbar(r).length && fest === null;
+      teil.innerHTML = oben + (rechercheLaeuft(r) ? laufHtml(r)
+        : nichtsMehr ? `<p>Alle Ausführungen des Vorschlags vom ${esc(fmtZeit(r.gestartet_am))} stehen schon im Katalog.</p>${startHtml(r)}`
+        : r && r.vorschlag ? vorschlagHtml(r) : `${r ? endeHtml(r) : ""}${startHtml(r)}`);
+      verdrahten();
+      hinweisZeigen();
+    }
+    function verdrahten() {
+      const feld = $("#pd-rs-domains", teil);
+      if (feld) {
+        feld.addEventListener("input", () => { domains = feld.value; });
+        feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#pd-rs-los", teil).click(); } });
+      }
+      ["fotos", "bemerkung"].forEach((k) => { const h = $(`#pd-rs-${k}`, teil); if (h) h.addEventListener("change", () => { haken[k] = h.checked; }); });
+      if ($("#pd-rs-los", teil)) $("#pd-rs-los", teil).onclick = (ev) => starten(ev.currentTarget);
+      if ($("#pd-rs-abbrechen", teil)) $("#pd-rs-abbrechen", teil).onclick = abbrechen;
+      if ($("#pd-rs-verwerfen", teil)) $("#pd-rs-verwerfen", teil).onclick = verwerfen;
+      if ($("#pd-rs-uebernehmen", teil)) $("#pd-rs-uebernehmen", teil).onclick = inFelder;
+      $$('input[name="pd-rs-nr"]', teil).forEach((x) => x.addEventListener("change", () => { nr = +x.value; }));
+      const neuKnopf = $("#pd-rs-neu", teil);
+      if (neuKnopf) {
+        neuKnopf.onclick = () => {
+          neuOffen = !neuOffen;
+          neuKnopf.setAttribute("aria-expanded", String(neuOffen));
+          $("#pd-rs-startteil", teil).hidden = !neuOffen;
+          if (neuOffen) fokus($("#pd-rs-domains", teil));
+        };
+      }
+    }
+    // C3 A: Läuft der Lauf oder ist sein Vorschlag fertig, steht oben im Reiter „Produkt“ ein Satz mit dem Weg hierher.
+    function hinweisZeigen() {
+      const el = $("#pd-rs-hinweis", body);
+      if (!el) return;
+      const r = lauf();
+      const laeuft = rechercheLaeuft(r);
+      if (uebernahme || !(laeuft || anlegbar(r).length)) { el.hidden = true; el.innerHTML = ""; return; }
+      const wer = m ? "Die Recherche zu dieser Meldung" : `Deine Recherche zu „${esc(laufName())}“`;
+      el.innerHTML = `${wer} ${laeuft ? "läuft" : "ist fertig"}. <button type="button" class="lnk" id="pd-rs-zum">${laeuft ? "Zur Recherche" : "Zum Vorschlag"}</button>`;
+      el.hidden = false;
+      $("#pd-rs-zum", el).onclick = () => reiterZeigen("recherche", true);
+    }
+
+    async function laden() {
+      const her = m ? "" : angaben().manufacturer;
+      try { d = await api(url.lesen(her)); geladenFuer = her; } catch (e) { if (!d) toast(e.message, true); }
+    }
+    // Beim Wechsel hierher (B1 A): die Angaben aus dem Reiter „Produkt“ gelten jetzt; hat sich der Hersteller geändert,
+    // kommt der Vorschlag der Herstellerseite neu – eine Eingabe von Hand bleibt stehen.
+    async function zeigen(neuLaden) {
+      startFehler = null;
+      if (neuLaden || !d || (!m && angaben().manufacturer !== geladenFuer)) await laden();
+      if (offen()) { zeichnen(); beobachten(); }
+    }
+
+    async function starten(knopf) {
+      const feld = $("#pd-rs-domains", teil);
+      const liste = feld.value.split(/[\s,;]+/).filter(Boolean);
+      if (!liste.length || liste.length > 3) { S.feldFehler(feld, "Bitte eine bis drei Domains angeben, z. B. hersteller.de."); return; }
+      const x = angaben();
+      knopf.disabled = true;
+      try {
+        const res = await api(url.starten(), { method: "POST", body: m ? { domains: liste, fotos: haken.fotos, bemerkung: haken.bemerkung }
+          : Object.assign({}, x, { domains: liste }) });
+        gestartet = `${x.manufacturer} ${x.model}`.trim();
+        hinweis = res.hinweis || null;
+        startFehler = null; neuOffen = false; nr = null; domains = null;
+        d = Object.assign({}, d, { recherche: res.recherche, moeglich: res.moeglich });
+        // AB2: Der neue Lauf hat die Dateien des alten entfernt – die Übernahme verweist nicht mehr auf ihn. Die
+        // übernommenen Werte bleiben in den Feldern, nur Fundstellen und „Dateien aus der Recherche“ gehen.
+        const warUebernommen = Boolean(uebernahme);
+        if (warUebernommen) { uebernahme = null; fest = null; dateienZeichnen(); produktFeldQuellen(body, {}); }
+        toast(warUebernommen ? "Recherche gestartet. Die Dateien des alten Vorschlags werden nicht mehr angehängt." : "Recherche gestartet");
+        zeichnen();
+        beobachten();
+        const stand = $(".mat-recherche-stand", teil);
+        if (stand) stand.focus({ preventScroll: true });
+      } catch (e) {
+        knopf.disabled = false;
+        if (e.status === 400) {
+          // Ein Feld des Reiters „Produkt“ (Hersteller, Modell …): dorthin, sonst an die Herstellerseite.
+          const ziel = !m && RS_FELD_FEHLER.find(([wort]) => e.message.includes(`„${wort}“`) || e.message.startsWith(`Die ${wort} `));
+          if (ziel && $(`#${ziel[1]}`, body)) { reiterZeigen("produkt"); S.feldFehler($(`#${ziel[1]}`, body), e.message); } else S.feldFehler(feld, e.message);
+        } else if ([409, 429, 503].includes(e.status)) {
+          startFehler = { text: e.message, produkt: e.daten && e.daten.produkt };
+          zeichnen();
+          const neu = $("#pd-rs-los", teil);
+          if (neu) neu.focus();
+        } else S.fehlschlag(knopf, e, body);
+      }
+    }
+    async function abbrechen() {
+      const r = lauf();
+      if (!(await confirm(`Recherche zu „${laufName()}“ abbrechen? Ein Vorschlag entsteht dann nicht; sie zählt trotzdem zum Kontingent.`,
+        "Recherche abbrechen", "Weiterlaufen lassen", { endgueltig: false }))) return;
+      try { await api(url.abbrechen(r), { method: "POST", body: {} }); toast("Recherche wird abgebrochen"); }
+      catch (e) { toast(e.message, true); }
+      if (offen()) { await laden(); zeichnen(); beobachten(); }
+    }
+    async function verwerfen() {
+      const r = lauf();
+      // Ohne Vorschlag (abgebrochen, gescheitert) geht nichts verloren: keine Dateien, keine endgültige Rückfrage (O3).
+      const ja = r.vorschlag
+        ? await confirm(`Vorschlag zu „${laufName()}“ verwerfen? Seine Dateien werden gelöscht; die Recherche zählt weiter zum Kontingent.`, "Verwerfen")
+        : await confirm(`Die ${r.status === "abgebrochen" ? "abgebrochene" : "gescheiterte"} Recherche aus dem Reiter nehmen? Sie zählt weiter zum Kontingent.`,
+          "Aus dem Reiter nehmen", "Abbrechen", { endgueltig: false });
+      if (!ja) return;
+      try {
+        await api(`${API}/recherche/${r.id}/verwerfen`, { method: "POST", body: {} });
+        toast(r.vorschlag ? "Vorschlag verworfen" : "Recherche aus dem Reiter genommen");
+        if (uebernahme && uebernahme.lauf.id === r.id) { uebernahme = null; dateienZeichnen(); }
+      } catch (e) { toast(e.message, true); }
+      if (offen()) { await laden(); zeichnen(); }
+    }
+
+    /* Nachfragen alle 5 s, solange der Lauf läuft, der Dialog offen und die Seite sichtbar ist. Am Ende ein Toast und der
+       Reiter zeichnet sich neu (auch, wenn gerade „Produkt“ zu sehen ist – dann steht oben der Hinweis). */
+    function beobachten() {
+      clearTimeout(nachfrage);
+      nachfrage = null;
+      const r = lauf();
+      if (!rechercheLaeuft(r) || !offen() || document.visibilityState !== "visible") return;
+      nachfrage = setTimeout(async () => {
+        nachfrage = null;
+        if (!offen()) return;
+        let neu;
+        try { neu = await api(url.stand(r)); }
+        catch (e) { if (!e.status) beobachten(); return; }             // ohne Netz: später noch einmal
+        if (!offen()) return;
+        const name = laufName();
+        d = Object.assign({}, d, { recherche: neu.recherche, moeglich: neu.moeglich, start: neu.start || d.start });
+        const jetzt = neu.recherche;
+        if (rechercheLaeuft(jetzt)) {
+          const stand = $(".mat-recherche-stand", teil);
+          if (!stand) zeichnen();
+          else if (stand.textContent !== rechercheStand(jetzt)) stand.textContent = rechercheStand(jetzt);
+          beobachten();
+          return;
+        }
+        toast(jetzt && jetzt.status === "fertig" ? `Recherche zu „${name}“ fertig` : jetzt && jetzt.status === "abgebrochen"
+          ? `Recherche zu „${name}“ abgebrochen` : `Recherche zu „${name}“ gescheitert`, Boolean(jetzt && jetzt.status === "fehlgeschlagen"));
+        zeichnen();
+      }, 5000);
+    }
+    document.addEventListener("visibilitychange", beobachten, { signal: aus.signal });
+
+    // „In die Felder übernehmen“ (3.4): erst die Kategorie mit ihrem change (deren Vorgaben greifen), dann die übrigen
+    // Werte – sie haben Vorrang; danach Materialart → Hilfen (Metall sperrt die Lebensdauer). Nicht vorbelegte Werte
+    // stehen nur als „Nicht vorbelegt (…): …“ unter dem Feld.
+    function inFelder() {
+      const r = lauf(), v = r.vorschlag;
+      // Nach dem Anlegen steht die festgelegte Ausführung selbst im Katalog – sie bleibt übernehmbar (S2).
+      const a = v.ausfuehrungen.find((x) => x.nr === nr && (fest === null ? x.anlegbar : x.nr === fest));
+      if (!a) return;
+      const gesetzt = [], quellen = {};
+      RS_FELDER.forEach((k) => {
+        const f = a.felder[k] || v.gemeinsam[k];
+        const el = $(`#${PRODUKT_FELD_ID[k]}`, body);
+        if (!f || !el) return;
+        if (f.vorbelegt && f.wert !== null && f.wert !== undefined && f.wert !== "") {
+          el.value = String(f.wert);
+          el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+          gesetzt.push(k);
+        }
+        const q = quelleHilfe(f);
+        if (q) quellen[k] = q;
+      });
+      if ($("#pd-mk", body)) $("#pd-mk", body).dispatchEvent(new Event("change"));
+      produktFeldQuellen(body, quellen);
+      uebernahme = { lauf: r, a, felder: gesetzt };
+      dateienZeichnen();
+      reiterZeigen("produkt", true);
+      hinweisZeigen();               // der Hinweis „… ist fertig“ hat sich mit der Übernahme erledigt (O5)
+      toast(`${plural(gesetzt.length, "Feld", "Felder")} übernommen – bitte prüfen`);
+    }
+    // D4 A: „Dateien aus der Recherche“ unter dem Bildfeld – je Dokument der gewählten Ausführung ein Häkchen (Vorwahl
+    // laut Prüfung), nicht angebotene mit Grund und Link; das Bild der Ausführung mit Häkchen, solange kein eigenes Bild
+    // gewählt ist (D5 A). Nach einem Teilfehler stehen die fehlenden Dateien darin (role="alert").
+    function dateienZeichnen() {
+      const platz = $("#pd-rs-dateien", body);
+      if (!platz) return;
+      if (!uebernahme) { platz.innerHTML = ""; return; }
+      const { lauf: r, a } = uebernahme;
+      const v = r.vorschlag;
+      const art = (f) => `${esc(DOKART[f.art] || f.art)}${f.version ? `, ${esc(f.version)}` : ""}`;
+      const dokumente = v.dateien.filter((f) => f.art !== "produktbild");
+      const wahl = dokumente.filter((f) => f.anbieten && (!f.gehoert_zu.length || f.gehoert_zu.includes(a.nr)));
+      const nicht = dokumente.filter((f) => !f.anbieten);
+      const bild = a.bild ? v.dateien.find((f) => f.n === a.bild && f.anbieten) : null;
+      const grund = (f) => f.fehler || (f.pruefung && f.pruefung.passt === "nein" ? `gehört nicht dazu: ${f.pruefung.begruendung || "ohne Begründung"}` : "nicht angeboten");
+      platz.innerHTML = `<fieldset class="mat-variante-doks mat-ue-dateien mat-rs-dateien"><legend>Dateien aus der Recherche</legend>
+        <p class="help">Ausführung ${a.nr}${a.felder.article_no && a.felder.article_no.wert ? ` (${esc(a.felder.article_no.wert)})` : ""} – die gewählten Dateien hängen nach „Anlegen“ am neuen Produkt.</p>
+        ${wahl.map((f) => `<label class="inline"><input type="checkbox" class="pd-rs-datei" value="${f.n}"${f.vorgewaehlt ? " checked" : ""}> ${esc(f.titel)} <span class="muted small">${art(f)}</span></label>`).join("")}
+        ${nicht.map((f) => `<p class="small mat-ue-nicht">${f.url ? fremdLink(f.url, esc(f.titel)) : esc(f.titel)} <span class="muted">(${art(f)})</span> – ${esc(grund(f))}</p>`).join("")}
+        ${!wahl.length && !nicht.length ? '<p class="help">Zu dieser Ausführung hat die Recherche keine Dokumente gefunden.</p>' : ""}
+        ${bild ? `<label class="inline mat-ue-bild"><input type="checkbox" id="pd-rs-bild"${bildWahl.datei ? "" : " checked"}> Bild aus der Recherche übernehmen <img src="${esc(url.datei(r, bild.n))}" alt="" loading="lazy"></label>` : ""}
+        <div class="mat-rs-fehler" role="alert" tabindex="-1"></div></fieldset>`;
+    }
+    // O4: Nach einem Teilfehler steht das Produkt schon – der Satz sagt das, darunter die fehlenden Dateien mit Link; der
+    // Fokus geht auf die Meldung (die Hauptaktion heißt dann „Fehlendes anhängen“, produktDialog).
+    function fehlerZeigen(fehler) {
+      const el = $("#pd-rs-dateien .mat-rs-fehler", body);
+      if (!el) return;
+      el.innerHTML = fehler.length ? `<p>Das Produkt ist angelegt, aber nicht alles hängt dran:</p>
+        <ul class="mat-vs-liste">${fehler.map((f) => { const titel = `<strong>${esc(f.titel || "Datei")}</strong>`; return `<li>${f.url ? fremdLink(f.url, titel) : titel}: ${esc(f.fehler)}</li>`; }).join("")}</ul>` : "";
+    }
+    // Fokus auf die Meldung (kein Eingabefeld – auch am Finger), mittig im Bild: unten klebt die Knopfzeile.
+    function meldungZeigen(el) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "center" });
+    }
+    /* Nach dem Anlegen (produktDialog): die gewählten Dateien an das Produkt – nur nach „In die Felder übernehmen“.
+       Danach ist die Ausführung festgelegt (S2). Lehnt der Server mit 404 oder 409 ab (der Vorschlag wurde inzwischen
+       verworfen oder ersetzt, etwa in einem zweiten Tab), fällt die Übernahme weg und das Anlegen geht mit dem eigenen
+       Bild weiter (AB5): {fehler: [], abgelehnt: Text} – der Dialog bleibt mit dem Satz offen. */
+    async function anhaengen(pid, eigenesBild) {
+      if (!uebernahme) return null;
+      const platz = $("#pd-rs-dateien", body);
+      const bildHaken = $("#pd-rs-bild", platz);
+      let res;
+      try {
+        res = await api(`${API}/recherche/${uebernahme.lauf.id}/anhaengen`, { method: "POST", body: {
+          product_id: pid, nr: uebernahme.a.nr, dateien: $$(".pd-rs-datei:checked", platz).map((c) => +c.value),
+          bild: Boolean(bildHaken && bildHaken.checked && !eigenesBild), felder: uebernahme.felder } });
+      } catch (e) {
+        if (![404, 409].includes(e.status)) throw e;
+        uebernahme = null;
+        fest = null;
+        dateienZeichnen();
+        platz.innerHTML = `<div class="mat-rs-fehler" role="alert" tabindex="-1"><p>Das Produkt ist angelegt, die Dateien aus der Recherche hängen aber nicht dran: ${esc(e.message)}</p></div>`;
+        reiterZeigen("produkt");
+        meldungZeigen($(".mat-rs-fehler", platz));
+        return { fehler: [], abgelehnt: e.message };
+      }
+      fest = uebernahme.a.nr;
+      const a = res.anhaengen;
+      fehlerZeigen(a.fehler);
+      if (a.fehler.length) { reiterZeigen("produkt"); meldungZeigen($(".mat-rs-fehler", platz)); }
+      return a;
+    }
+
+    zeichnen();
+    beobachten();
+    return {
+      zeigen: () => zeigen(false),
+      anhaengen,
+      // D5 A: Ein eigenes Bild gewinnt – das Häkchen „Bild aus der Recherche übernehmen“ geht aus.
+      eigenesBild: () => { const h = $("#pd-rs-bild", body); if (h) h.checked = false; },
+    };
   }
 
   async function meldungenZaehlen(el) {

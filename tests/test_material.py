@@ -349,18 +349,22 @@ def test_rollen():
             return d
         assert darf(k["fuehrung"]) == {"lesen": True, "grund": True, "verwalten": False, "pruefen": False, "katalog": False,
                                        "alles": False, "gliederung_anlegen": False, "qualifiziert": False,
-                                       "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False}
+                                       "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False,
+                                       "recherche": False}
         assert darf(k["wart"])["verwalten"] and not darf(k["wart"])["pruefen"] and not darf(k["wart"])["alles"]
         assert not darf(k["wart"])["katalog"]
         assert darf(k["pruefer"])["pruefen"] and darf(k["pruefer"])["qualifiziert"] and not darf(k["pruefer"])["verwalten"]
-        # Die Material-Verwaltung (ohne Plattform-Verwaltung): Katalog, alles, Gliederungen – prüfen nie von selbst.
+        # Die Material-Verwaltung (ohne Plattform-Verwaltung): Katalog, alles, Gliederungen – prüfen nie von selbst. Den
+        # Reiter „Recherche“ im Produktdialog (22.11.2026) gibt es nur mit API-Schlüssel – hier keiner.
         assert darf(k["katalog"]) == {"lesen": True, "grund": True, "verwalten": True, "pruefen": False, "katalog": True,
                                       "alles": True, "gliederung_anlegen": True, "qualifiziert": False,
-                                      "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False}
+                                      "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False,
+                                      "recherche": False}
         # Admin (Plattform-Verwaltung): auch Material-Verwaltung – Prüfer aber nie von selbst.
         assert darf(adm) == {"lesen": True, "grund": True, "verwalten": True, "pruefen": False, "katalog": True,
                              "alles": True, "gliederung_anlegen": True, "qualifiziert": False,
-                             "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False}
+                             "urkundennummer": "", "pruefer_haekchen": False, "unterschrift": False,
+                             "recherche": False}
         assert darf(k["nutzer"]) == 403
         # Die Stufe für Kopfleiste, Startweiche und Profil ist die gespeicherte (die Plattform-Verwaltung hat 3).
         stufen = {u["email"]: u["rechte"]["material"] for u in adm.get("/api/admin/users").json["users"]}

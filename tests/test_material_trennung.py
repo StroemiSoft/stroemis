@@ -1269,6 +1269,7 @@ def test_nichts_aus_b():
                      "kid": ids["karabiner"], "did": 999999, "ruid": 999999, "anid": 999999, "filename": "material.js", "sid": 999999,
                      "uid": t.wart_b_id,                    # „Rechte ändern“ je Person (02.11.2026)
                      "n": 1,                                # Datei einer Recherche (21.11.2026)
+                     "lid": 999999,                         # Lauf der Recherche im Produktdialog (22.11.2026)
                      "jahr": _heute().year,                 # Jahresbericht (P4-L1) über („ordner“/„export“, fid)
                      "art": "web", "dateiname": "x.jpg", "mfid": b.mailfehler,
                      ("produkte", "pid"): ids["hms"], ("produkt", "pid"): ids["hms"],

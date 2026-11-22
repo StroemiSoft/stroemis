@@ -24,7 +24,18 @@ Ablauf eines Laufs:
 Je Ausführung (eigene Artikelnummer) ein eigener Vorschlag (E4 B); uebernehmen() legt mehrere Produkte auf einmal an.
 Rechte: alles nur die Material-Verwaltung (B1 A, B2 A) – auch die Journaleinträge (entity „recherche“, journal.py).
 An Anthropic geht nie ein Name, eine E-Mail, ein Ordner oder eine Gliederung; die Bemerkung des Melders nur mit Häkchen
-(D2 B), Fotos nur mit Häkchen als EXIF-freie Web-Fassung (D1 A)."""
+(D2 B), Fotos nur mit Häkchen als EXIF-freie Web-Fassung (D1 A).
+
+Seit dem 22.11.2026 auch als Reiter „Recherche“ im Produktdialog (entwurf_recherche_reiter_produkt.md, „Alles
+Empfehlung“): Ohne Meldung recherchiert die Material-Verwaltung mit den Angaben aus dem Formular (katalog_starten,
+Bezug „mat_katalog“ für alle solchen Läufe – wem ein Lauf gehört, sagt gestartet_von, nicht der Bezug: Kontokennungen
+werden wieder vergeben). Je Konto zählt der jüngste eigene Lauf (eigener); ein neuer Start ersetzt ihn, „Verwerfen“
+nimmt ihn weg, seine Dateien bleiben AUFHEBEN_TAGE nach dem Ende. Der Reiter füllt nur die Felder des Dialogs; nach dem
+Anlegen hängt anhaengen() die gewählten Dateien an das neue Produkt – für Läufe mit und ohne Meldung (aus einer Meldung
+startet und liest der Reiter über die Routen der Meldung, ein Lauf für Karte und Reiter). Kontingent und „höchstens
+eine app-weit“ gelten für beide Wege gemeinsam (dieselbe Art). Die Angaben stehen bei beiden Herkünften unter
+eingabe_json.meldung (ältere Läufe kennen nur diesen Schlüssel), die Herkunft unter eingabe_json.herkunft; das Journal
+eines Laufs ohne Meldung steht unter entity „ki_lauf“ (Kennung des Laufs)."""
 import base64
 import io
 import json
@@ -40,7 +51,8 @@ from werkzeug.datastructures import FileStorage
 from ... import db, ki
 from ..models import DOKUMENTARTEN as DOKUMENT_NAMEN
 from ..models import MATERIALARTEN
-from . import Abgelehnt, heute, journal, katalog, wahr
+from ...auth import current_user
+from . import Abgelehnt, heute, journal, katalog, kennung, text, wahr
 from . import meldung as meldung_dienst
 from . import recherche_netz as netz
 
@@ -63,7 +75,8 @@ INTERVALL = 12
 QUELLE_MAX = 300
 NORM_MAX = 200
 KATALOG_PRODUKTE = 200
-AUFHEBEN_TAGE = 30                    # so lange nach dem Erledigen der Meldung bleiben die Dateien eines Laufs
+AUFHEBEN_TAGE = 30                    # so lange nach dem Erledigen der Meldung (ohne Meldung: nach dem Ende) bleiben
+                                      # die Dateien eines Laufs
 BELEGE = ("hersteller", "webarchiv", "nur_identifikation", "nicht_belegt")
 DOKUMENTARTEN = ("gebrauchsanleitung", "konformitaetserklaerung", "pruefanweisung", "datenblatt", "sonstiges")
 PHASEN = {"recherche": "Recherche läuft", "dateien": "Dateien werden geladen", "pruefen": "Dateien werden geprüft",
@@ -80,6 +93,15 @@ AN_ANTHROPIC = {"titel": "An Anthropic (Claude API) gehen:",
                              "die Kategorien des Katalogs und die Produkte dieses Herstellers im Katalog",
                              "mit Häkchen: die Fotos (ohne Metadaten) und die Bemerkung"],
                 "nie": "Nie: Namen, E-Mail-Adressen, Ordner, Gliederung."}
+# Dasselbe für den Reiter im Produktdialog ohne Meldung: die Angaben aus dem Formular, ohne Häkchen (B2 A).
+AN_ANTHROPIC_KATALOG = {"titel": "An Anthropic (Claude API) gehen:",
+                        "gesendet": ["Hersteller, Modell, Artikelnummer, Norm, Kategorie und Bemerkung aus dem Formular",
+                                     "die Herstellerseiten",
+                                     "die Kategorien des Katalogs und die Produkte dieses Herstellers im Katalog"],
+                        "nie": "Nie: Namen, E-Mail-Adressen, Ordner, Gliederung."}
+BEZUG_KATALOG = "mat_katalog"         # alle Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog)
+KEIN_KATALOG_LAUF = "Diese Recherche gibt es nicht."
+ERSETZT = "Zu diesem Vorschlag gibt es eine neuere Recherche – seine Dateien hängen nicht mehr an."
 
 
 def bezug(mid):
@@ -499,8 +521,10 @@ def _katalog_kontext(m):
     return {"kategorien": kats, "hersteller": hersteller, "produkte": produkte}
 
 
-def eingabe_bauen(m, domains, fotos, bemerkung):
-    """Was an Anthropic geht – genau das steht danach in eingabe_json (Nachweis). Nie Namen, E-Mail, Ordner."""
+def eingabe_bauen(m, domains, fotos, bemerkung, herkunft="meldung"):
+    """Was an Anthropic geht – genau das steht danach in eingabe_json (Nachweis). Nie Namen, E-Mail, Ordner. m: die
+    Zeile der Meldung oder (herkunft „katalog“) die Angaben aus dem Formular (katalog_eingabe) – dann ist bemerkung die
+    Bemerkung des Produkts (Zusatz hinter dem Namen), die ohne Häkchen mitgeht (B2 A)."""
     kat = None
     if m["category_id"] and db.query("SELECT 1 FROM mat_category WHERE id = ?", (m["category_id"],), one=True):
         kat = {"id": m["category_id"], "pfad": " / ".join(x["name"] for x in katalog.kategorie_pfad(m["category_id"]))}
@@ -519,7 +543,7 @@ def eingabe_bauen(m, domains, fotos, bemerkung):
         "meldung": {"hersteller": m["manufacturer"], "modell": m["model"], "artikelnummer": m["article_no"] or "",
                     "norm": m["norm"] or "", "kategorie": kat, "links": links,
                     **({"bemerkung": m["note"]} if bemerkung and m["note"] else {})},
-        "domains": list(domains), "abruf_domains": sorted(abruf),
+        "herkunft": herkunft, "domains": list(domains), "abruf_domains": sorted(abruf),
         "fotos": _fotos(m) if fotos else [], "bemerkung": bool(bemerkung and m["note"]),
         "katalog": _katalog_kontext(m), "hersteller_schluessel": _schluessel(m["manufacturer"]),
         "modell": ki.MODELL, "effort": EFFORT,
@@ -562,28 +586,114 @@ def starten(mid, d):
 
 
 def laeuft_text(z):
+    """Der Sperrgrund „läuft schon“ – für beide Wege verständlich (3.8): an einer Meldung bzw. im Produktdialog, dort
+    mit dem Namen dessen, der gestartet hat (C2 A: den fremden Vorschlag sieht niemand sonst)."""
     mid = _mid(z["bezug"]) if z else None
     m = db.query("SELECT manufacturer, model FROM mat_product_request WHERE id = ?", (mid,), one=True) if mid else None
-    return (f"Es läuft schon eine Recherche zu „{m['manufacturer']} {m['model']}“." if m
-            else "Es läuft schon eine Recherche.")
+    if m:
+        return f"Es läuft schon eine Recherche zu „{m['manufacturer']} {m['model']}“ (Produktmeldung)."
+    angaben = (ki.json_lesen(z["eingabe_json"], {}) or {}).get("meldung") if z and z["bezug"] == BEZUG_KATALOG else None
+    if angaben:
+        return (f"Es läuft schon eine Recherche zu „{angaben['hersteller']} {angaben['modell']}“ "
+                f"({z['gestartet_von_name'] or 'ohne Namen'}).")
+    return "Es läuft schon eine Recherche."
+
+
+# --- Start ohne Meldung (Reiter „Recherche“ im Produktdialog) --------------------------------------------------------
+
+class ImKatalog(Abgelehnt):
+    """409: Das Produkt steht schon im Katalog (E2 A) – die Route nennt es mit Kennung und Namen."""
+
+    def __init__(self, meldung, produkt):
+        super().__init__(meldung, 409)
+        self.produkt = produkt
+
+
+def katalog_eingabe(d):
+    """Die Angaben aus dem Formular als Zeile wie eine Meldung (eingabe_bauen) – mit den Grenzen von meldung.anlegen
+    und der Bemerkung des Produkts (katalog.beschreibung); ohne Links, Fotos und Bemerkung eines Melders."""
+    w = {
+        "manufacturer": text(d, "manufacturer", "Hersteller", 120, pflicht=True),
+        "model": text(d, "model", "Modell", 160, pflicht=True),
+        "article_no": katalog.artikelnummer(text(d, "article_no", "Artikelnummer", 80)),
+        "norm": text(d, "norm", "Norm", NORM_MAX),
+        "category_id": kennung(d.get("category_id"), "Kategorie", leer_erlaubt=True),
+        "description": katalog.beschreibung(d),
+        "links_json": "[]", "photos_json": "[]",
+    }
+    if w["category_id"] and not db.query("SELECT 1 FROM mat_category WHERE id = ?", (w["category_id"],), one=True):
+        raise Abgelehnt("„Kategorie“: Diese Kategorie gibt es nicht (mehr) – bitte neu wählen.")
+    # Die Bemerkung des Produkts steht im Feld „note“ der Zeile: eingabe_bauen nimmt sie von dort (B2 A).
+    w["note"] = w["description"]
+    return w
+
+
+def katalog_startdaten(hersteller):
+    """Was der Reiter vor dem Start zeigt: Vorschlag der Domains (letzte Recherche zum selben Hersteller, B4 A) und was
+    an die API geht."""
+    domains, _ = domains_vorschlag({"manufacturer": hersteller or "", "links_json": "[]"})
+    return {"domains": domains, "datenschutz": AN_ANTHROPIC_KATALOG}
+
+
+def katalog_starten(d):
+    """POST /recherche: {manufacturer, model, article_no, norm, category_id, description, domains} → (Zeile des neuen
+    Laufs, Hinweis oder None). Steht das Produkt schon im Katalog, gibt es nichts zu recherchieren (E2 A, 409 mit dem
+    Produkt); zu einer offenen Meldung desselben Produkts kommt nur ein Hinweis (E3 A). Ersetzt den eigenen
+    Vorgänger ohne Meldung – dessen Dateien gehen sofort."""
+    m = katalog_eingabe(d)
+    domains = domains_lesen(d)
+    da = _im_katalog(m["manufacturer"], m["model"], m["article_no"])
+    if da:
+        raise ImKatalog(f"„{da['name']}“ steht schon im Katalog – eine Recherche ist nicht nötig.", da)
+    key = katalog.dedupe_key(m["manufacturer"], m["model"], m["article_no"])
+    offen = db.query("SELECT id FROM mat_product_request WHERE dedupe_key = ? AND status = 'offen' ORDER BY id LIMIT 1",
+                     (key,), one=True)
+    hinweis = ({"text": f"Zu „{m['manufacturer']} {m['model']}“ gibt es eine offene Produktmeldung – dort steht "
+                        "vielleicht schon ein Vorschlag.", "meldung": offen["id"]} if offen else None)
+    eingabe = eingabe_bauen(m, domains, False, True, herkunft="katalog")
+    u = current_user()
+
+    def vor_start(z):
+        # Der neue Lauf ersetzt die früheren eigenen ohne Meldung: deren Dateien gehen jetzt (wie H1 A).
+        for alt in db.query(f"SELECT id FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ? AND id < ? "
+                            f"AND status NOT IN ({','.join('?' * len(ki.LAUFEND))})",
+                            (ART, BEZUG_KATALOG, u["id"], z["id"], *ki.LAUFEND)):
+            ki.ordner_entfernen(alt["id"])
+        with db.transaction():
+            journal.eintragen("ki_lauf", z["id"], "recherche_gestartet", None,
+                              {"domains": domains, "bemerkung_mit": eingabe["bemerkung"], "ki_modell": ki.MODELL,
+                               "effort": EFFORT, "ki_lauf": z["id"]})
+    try:
+        z = ki.starten(ART, BEZUG_KATALOG, eingabe, partial(_arbeit, None), effort=EFFORT, beendet=_beendet,
+                       mit_ordner=True, vor_start=vor_start)
+    except ki.KiFehler as exc:
+        if exc.code == 409 and exc.lauf:
+            raise Abgelehnt(laeuft_text(exc.lauf), 409)
+        raise Abgelehnt(str(exc), exc.code)
+    return z, hinweis
 
 
 # --- Der Lauf ------------------------------------------------------------------------------------------------------
 
 def _nachricht(lauf):
-    """Die Nutzernachricht von Aufruf 1: Fotos (falls gewählt) als Bilder, dann der Text mit Meldung und Katalog."""
+    """Die Nutzernachricht von Aufruf 1: Fotos (falls gewählt) als Bilder, dann der Text mit Meldung bzw. den Angaben
+    aus dem Formular des Produktdialogs (herkunft „katalog“) und dem Katalog."""
     e = lauf.eingabe
     m = e["meldung"]
-    zeilen = ["Gemeldetes Produkt (Angaben des Melders, ungeprüft):",
+    formular = e.get("herkunft") == "katalog"
+    zeilen = ["Produkt (Angaben der Material-Verwaltung aus dem Formular, ungeprüft):" if formular
+              else "Gemeldetes Produkt (Angaben des Melders, ungeprüft):",
               f"- Hersteller: {m['hersteller']}", f"- Modell: {m['modell']}",
               f"- Artikelnummer: {m['artikelnummer'] or 'nicht angegeben'}",
               f"- Norm: {m['norm'] or 'nicht angegeben'}"]
     if m.get("kategorie"):
-        zeilen.append(f"- Kategorie-Vorschlag des Melders: {m['kategorie']['pfad']} (Kennung {m['kategorie']['id']})")
+        zeilen.append(f"- {'Kategorie aus dem Formular' if formular else 'Kategorie-Vorschlag des Melders'}: "
+                      f"{m['kategorie']['pfad']} (Kennung {m['kategorie']['id']})")
     if m["links"]:
         zeilen += ["- Links aus der Meldung:"] + [f"  {x}" for x in m["links"]]
     if m.get("bemerkung"):
-        zeilen += ["- Bemerkung des Melders:", m["bemerkung"]]
+        zeilen += [f"- Bemerkung (Zusatz hinter dem Namen): {m['bemerkung']}"] if formular \
+            else ["- Bemerkung des Melders:", m["bemerkung"]]
     zeilen += ["", "Bestätigte Herstellerdomains (Werte und Dateien nur von dort bzw. aus ihren Archivständen):"]
     zeilen += [f"- {d} (Startseite https://{d}/)" for d in e["domains"]]
     k = e["katalog"]
@@ -894,7 +1004,7 @@ def pruefung_lesen(p, nummern):
 
 
 def _arbeit(mid, lauf):
-    """Der ganze Lauf im Thread → {vorschlag, ergebnis, dateien}."""
+    """Der ganze Lauf im Thread → {vorschlag, ergebnis, dateien} (mid: die Meldung oder None, nur zur Zuordnung)."""
     lauf.schritt("recherche")
     ergebnis = _recherche(lauf)
     dateien = _dateiliste(ergebnis)
@@ -908,8 +1018,8 @@ def _arbeit(mid, lauf):
 def _beendet(lauf, status):
     """Journal nach dem Ende (entity „recherche“, nur für die Material-Verwaltung): Status, Zahl belegter Felder und
     Dateien – keine Kosten, keine Zitate."""
-    mid = _mid(lauf.bezug)
-    if not mid or not db.query("SELECT 1 FROM mat_product_request WHERE id = ?", (mid,), one=True):
+    eintrag = _journal_bezug(lauf.bezug, lauf.id)
+    if not eintrag:
         return
     z = ki.zeile(lauf.id)
     nachher = {"status": status, "ki_lauf": lauf.id}
@@ -921,23 +1031,33 @@ def _beendet(lauf, status):
         nachher["grund"] = z["fehler"]
     # Ohne angemeldetes Konto (es wurde während des Laufs gelöscht, ki._ausfuehren) steht der Eintrag ohne Kennung da.
     with db.transaction():
-        journal.eintragen("recherche", mid, "recherche_beendet", None, nachher,
-                          name=z["gestartet_von_name"] if z else None)
+        journal.eintragen(*eintrag, "recherche_beendet", None, nachher, name=z["gestartet_von_name"] if z else None)
 
 
 def _tot(z):
     """Nach tote_aufraeumen (Neustart, Deploy): „Recherche beendet“ im Journal nachtragen – im Namen dessen, der
     gestartet hat, nicht dessen, dessen Anfrage gerade aufräumt."""
-    mid = _mid(z["bezug"]) if z else None
-    if not mid or not db.query("SELECT 1 FROM mat_product_request WHERE id = ?", (mid,), one=True):
+    eintrag = _journal_bezug(z["bezug"], z["id"]) if z else None
+    if not eintrag:
         return
     with db.transaction():
-        journal.eintragen("recherche", mid, "recherche_beendet", None,
+        journal.eintragen(*eintrag, "recherche_beendet", None,
                           {"status": z["status"], "ki_lauf": z["id"], "grund": z["fehler"]},
                           fuer=(z["gestartet_von"], z["gestartet_von_name"] or "System"))
 
 
 ki.bei_tod(ART, _tot)
+
+
+def _journal_bezug(bezug_text, lauf_id):
+    """(entity, entity_id) des Journals eines Laufs: an einer Meldung „recherche“ mit ihrer Kennung (nur, solange es sie
+    gibt), ohne Meldung „ki_lauf“ mit der Kennung des Laufs (3.6) – sonst None."""
+    if bezug_text == BEZUG_KATALOG:
+        return ("ki_lauf", lauf_id)
+    mid = _mid(bezug_text)
+    if mid and db.query("SELECT 1 FROM mat_product_request WHERE id = ?", (mid,), one=True):
+        return ("recherche", mid)
+    return None
 
 
 # --- Zusammenführen --------------------------------------------------------------------------------------------------
@@ -1157,6 +1277,9 @@ def zusammenfuehren(ergebnis, dateien, eingabe, usage=()):
     def belegt(wert, b, vermerk=""):
         return _feld(wert, b, domains, vermerk, gelesen=gelesen)
     m = eingabe["meldung"]
+    # Woher die Rückfallwerte stammen: aus der Meldung bzw. aus dem Formular des Produktdialogs.
+    formular = eingabe.get("herkunft") == "katalog"
+    aus_angaben = "aus dem Formular" if formular else "aus der Meldung"
     gem = ergebnis["gemeinsam"]
     hinweise = list(ergebnis["hinweise"])
     if gem["nicht_mehr_im_angebot"]:
@@ -1229,16 +1352,16 @@ def zusammenfuehren(ergebnis, dateien, eingabe, usage=()):
     if schreibweise:
         hersteller["vorbelegt"] = True
     elif not hersteller["vorbelegt"]:
-        hersteller = _fest(m["hersteller"], "aus der Meldung", hersteller["beleg"])
+        hersteller = _fest(m["hersteller"], aus_angaben, hersteller["beleg"])
     modell = belegt(gem["modell"]["wert"], gem["modell"])
     if not modell["vorbelegt"]:
-        modell = _fest(m["modell"], "aus der Meldung", modell["beleg"])
+        modell = _fest(m["modell"], aus_angaben, modell["beleg"])
     kats = {k["id"] for k in eingabe["katalog"]["kategorien"]}
     kid = gem["kategorie_id"]["wert"]
     if kid in kats and db.query("SELECT 1 FROM mat_category WHERE id = ?", (kid,), one=True):
         kategorie = _fest(kid, "Vorschlag der Recherche")
     elif m.get("kategorie"):
-        kategorie = _fest(m["kategorie"]["id"], "Vorschlag des Melders")
+        kategorie = _fest(m["kategorie"]["id"], aus_angaben if formular else "Vorschlag des Melders")
     else:
         kategorie = _fest(None, "bitte wählen", "nicht_belegt")
     mat = belegt(gem["materialart"]["wert"], gem["materialart"])
@@ -1323,21 +1446,30 @@ def status_json(z, voll=False):
         # Für den Satz an der Karte („Aus der Recherche angelegt: …“): die Produkte der Übernahme, die es noch gibt. Die
         # Kennung eines gelöschten Produkts kann SQLite wieder vergeben (INTEGER PRIMARY KEY ohne AUTOINCREMENT) – ein
         # Produkt, das erst nach der Übernahme entstand, ist ein anderes.
+        # Je Produkt zählt die Zeit SEINER Übernahme (im Reiter kommen Ausführungen nacheinander dazu, anhaengen).
         erg = ki.json_lesen(z["ergebnis_json"], {}) or {}
         ue = erg.get("uebernahme") or {}
-        ids = [e["product_id"] for e in ue.get("produkte", [])]
-        je_id = {p["id"]: dict(p) for p in db.query(
-            "SELECT id, manufacturer, model, description, article_no FROM mat_product WHERE created_at <= ? AND id IN "
-            f"({','.join('?' * len(ids))})", (ue.get("am") or "", *ids))} if ids else {}
-        out["produkte"] = [je_id[i] for i in ids if i in je_id]
+        eintraege = ue.get("produkte", [])
+        ids = [e["product_id"] for e in eintraege]
+        je_id = {p["id"]: p for p in db.query(
+            "SELECT id, manufacturer, model, description, article_no, created_at FROM mat_product WHERE id IN "
+            f"({','.join('?' * len(ids))})", ids)} if ids else {}
+        out["produkte"] = [{k: je_id[e["product_id"]][k] for k in ("id", "manufacturer", "model", "description",
+                                                                   "article_no")}
+                           for e in eintraege if e["product_id"] in je_id
+                           and je_id[e["product_id"]]["created_at"] <= (e.get("am") or ue.get("am") or "")]
     if voll:
         e = ki.json_lesen(z["eingabe_json"], {}) or {}
         out["eingabe"] = {k: e[k] for k in ("meldung", "domains", "abruf_domains", "bemerkung") if k in e}
         out["eingabe"]["fotos"] = len(e.get("fotos") or [])
+        out["eingabe"]["herkunft"] = e.get("herkunft") or ("katalog" if z["bezug"] == BEZUG_KATALOG else "meldung")
         erg = erg if erg is not None else ki.json_lesen(z["ergebnis_json"], {}) or {}
         out["vorschlag"] = erg.get("vorschlag") if z["status"] in ("fertig", "uebernommen") else None
         out["uebernahme"] = erg.get("uebernahme")
-        if out["vorschlag"] and z["status"] == "fertig":
+        out["verworfen"] = erg.get("verworfen")
+        # Auch übernommen: Im Reiter bleibt ein Vorschlag, bis keine Ausführung mehr anlegbar ist (D3 A) – angelegte
+        # stehen dann von selbst „im Katalog“.
+        if out["vorschlag"]:
             _katalog_jetzt(out["vorschlag"])
         if out["vorschlag"] and out["uebernahme"]:
             out["fehlt"] = fehlend(out["uebernahme"], out["vorschlag"])
@@ -1351,7 +1483,7 @@ def fehlend(ue, v):
     n = 0
     for e in ue.get("produkte", []):
         p = db.query("SELECT id, image FROM mat_product WHERE id = ? AND created_at <= ?",
-                     (e["product_id"], ue.get("am") or "9999"), one=True)
+                     (e["product_id"], e.get("am") or ue.get("am") or "9999"), one=True)
         if not p:
             continue
         da = {(r["sha256"], r["kind"]) for r in db.query(
@@ -1415,7 +1547,10 @@ def abbrechen(mid):
 def datei(mid, n):
     """(Ordner, Dateiname, MIME) einer Datei des jüngsten Vorschlags – sonst 404."""
     meldung_dienst.meldung(mid)
-    z = _lauf(mid)
+    return _datei(_lauf(mid), n)
+
+
+def _datei(z, n):
     v = (ki.json_lesen(z["ergebnis_json"], {}) or {}).get("vorschlag") if z and z["status"] in (
         "fertig", "uebernommen") else None
     f = next((x for x in (v or {}).get("dateien", []) if x["n"] == n and x.get("datei")), None)
@@ -1425,6 +1560,104 @@ def datei(mid, n):
     if not os.path.isfile(os.path.join(ki.ordner(z["id"]), name)):
         raise Abgelehnt("Die Datei liegt nicht mehr vor – bitte über den Link von Hand laden.", 404)
     return ki.ordner(z["id"]), name, f["mime"]
+
+
+# --- Ohne Meldung: der eigene Lauf, Lesen nach Kennung, Abbrechen, Verwerfen ----------------------------------------
+
+def eigener(user=None):
+    """Der jüngste eigene Lauf ohne Meldung (C1 A) als Zeile – oder None. Wem er gehört, sagt gestartet_von; nach einer
+    Kontolöschung ist es NULL, dann sieht ihn niemand mehr."""
+    u = user or current_user()
+    if not u:
+        return None
+    return db.query("SELECT * FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ? ORDER BY id DESC LIMIT 1",
+                    (ART, BEZUG_KATALOG, u["id"]), one=True)
+
+
+def _frist():
+    """Grenze der Aufbewahrung (UTC wie db.now): Was davor endete bzw. erledigt wurde, hat keine Dateien mehr."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=AUFHEBEN_TAGE)).replace(microsecond=0).isoformat()
+
+
+def _abgelaufen(z, frist=None):
+    """Ein fertiger oder übernommener Lauf, dessen Dateien die Frist ohne Meldung überschritten haben – der Tageslauf
+    entfernt sie (aufraeumen), der Reiter zeigt ihn nicht mehr (katalog_lesen). Dieselbe Zeit an beiden Stellen; nach
+    der Zeit, nicht nach dem Ordner: Der Tageslauf kommt nur einmal am Tag (Prüfung Ablauf, B1)."""
+    return z["status"] in ("fertig", "uebernommen") and (z["beendet_am"] or "") < (frist or _frist())
+
+
+def _neuerer(z):
+    """Gibt es zu diesem Lauf einen neueren, der ihn ersetzt – ohne Meldung einen eigenen ohne Meldung (ohne Konto
+    keinen), an einer Meldung einen neueren derselben Meldung? Dessen Start hat die Dateien dieses Laufs entfernt."""
+    if z["bezug"] == BEZUG_KATALOG:
+        return z["gestartet_von"] is not None and bool(db.query(
+            "SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ? AND id > ? LIMIT 1",
+            (ART, BEZUG_KATALOG, z["gestartet_von"], z["id"]), one=True))
+    return bool(db.query("SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND id > ? LIMIT 1",
+                         (ART, z["bezug"], z["id"]), one=True))
+
+
+def katalog_lesen(hersteller=""):
+    """GET /recherche: der eigene Lauf ohne Meldung (voll), Möglichkeit und die Daten des Starts (nur mit Schlüssel;
+    die Domains zum Hersteller aus dem Formular). Den Lauf zeigt der Reiter nicht mehr (dann steht dort der Start), wenn
+    er verworfen ist, wenn seine Dateien nach AUFHEBEN_TAGE abgelaufen sind (C5 A) oder wenn keine seiner Ausführungen
+    mehr anlegbar ist, gleich in welchem Status (3.4). Ein Vorschlag ganz ohne Ausführung bleibt stehen, bis er
+    verworfen, ersetzt oder abgelaufen ist."""
+    ki.tote_aufraeumen()
+    z = eigener()
+    r = status_json(z, voll=True)
+    if r and (r["verworfen"] or _abgelaufen(z) or (r["vorschlag"] and r["vorschlag"]["ausfuehrungen"] and not any(
+            a["anlegbar"] for a in r["vorschlag"]["ausfuehrungen"]))):
+        r = None
+    return {"recherche": r, "moeglich": moeglich(),
+            "start": katalog_startdaten(hersteller) if ki.verfuegbar() else None}
+
+
+def katalog_lauf(lid):
+    """Ein Lauf ohne Meldung nach seiner Kennung – sonst 404 (Läufe einer Meldung gehen über deren Routen). Jede
+    Material-Verwaltung darf jeden Lauf lesen (plattformweite Rolle); „nur der eigene“ gilt für die Anzeige."""
+    z = ki.zeile(lid)
+    if not z or z["art"] != ART or z["bezug"] != BEZUG_KATALOG:
+        raise Abgelehnt(KEIN_KATALOG_LAUF, 404)
+    return z
+
+
+def lauf_lesen(lid):
+    """GET /recherche/<lid>: der Stand (voll) zum Nachfragen alle 5 s und die Möglichkeit."""
+    ki.tote_aufraeumen()
+    return {"recherche": status_json(katalog_lauf(lid), voll=True), "moeglich": moeglich()}
+
+
+def lauf_abbrechen(lid):
+    z = katalog_lauf(lid)
+    if z["status"] not in ki.LAUFEND:
+        raise Abgelehnt("Diese Recherche läuft nicht mehr.", 409)
+    ki.abbrechen(z["id"])
+    return ki.zeile(z["id"])
+
+
+def lauf_datei(lid, n):
+    return _datei(katalog_lauf(lid), n)
+
+
+def verwerfen(lid):
+    """POST /recherche/<lid>/verwerfen (C4 A): nur der eigene Lauf ohne Meldung, der nicht mehr läuft. Seine Dateien
+    gehen sofort, Eingabe und Vorschlag bleiben als Nachweis (C6 A); ergebnis_json.verworfen hält die Zeit fest. Die
+    Zeile zählt weiter zum Kontingent. Wiederholt: nichts mehr zu tun."""
+    z = katalog_lauf(lid)
+    u = current_user()
+    if not u or z["gestartet_von"] != u["id"]:
+        raise Abgelehnt("Verwerfen kann nur, wer die Recherche gestartet hat.", 403)
+    if z["status"] in ki.LAUFEND:
+        raise Abgelehnt("Die Recherche läuft noch – bitte zuerst abbrechen.", 409)
+    with db.transaction(sofort=True):
+        erg = ki.json_lesen(ki.zeile(lid)["ergebnis_json"], {}) or {}
+        if not erg.get("verworfen"):
+            erg["verworfen"] = db.now()
+            db.execute("UPDATE ki_laeufe SET ergebnis_json = ? WHERE id = ?", (json.dumps(erg, ensure_ascii=False), lid))
+    ki.ordner_entfernen(lid)
+    return {"ok": True}
 
 
 # --- Übernehmen ------------------------------------------------------------------------------------------------------
@@ -1542,6 +1775,117 @@ def _antwort(mid, lauf_id, anhaengen):
             "anhaengen": anhaengen, "recherche": status_json(z)}
 
 
+def anhaengen(lid, d):
+    """POST /recherche/<lid>/anhaengen {product_id, nr, dateien, bild, felder} – nach „Anlegen“ im Produktdialog, für
+    Läufe mit und ohne Meldung (3.4): die gewählten Dateien der Ausführung nr an das eben angelegte Produkt. Geprüft wird
+    wie bei der Übernahme an der Meldung (nur angebotene Dateien dieser Ausführung, ihr Bild), dazu: Das Produkt
+    entstand nach dem Lauf (G3 A – nie an ein bestehendes), an einer Meldung ist es das Produkt, mit dem sie erledigt
+    wurde. Abgelehnt (409): ein Lauf, den ein neuerer ersetzt hat (dessen Start hat die Dateien entfernt), eine
+    Ausführung, die schon als anderes Produkt im Katalog steht, und eine andere Ausführung als die, aus der das Produkt
+    schon angelegt wurde (ein Produkt hat genau eine). Trägt das Produkt in uebernahme.produkte ein (je Produkt einmal,
+    mit der Zeit SEINER Übernahme), setzt den Lauf auf „übernommen“ und schreibt „Recherche übernommen“ ins Journal –
+    auch ganz ohne Dateien. Wiederholbar: Ein zweiter Aufruf hängt nur an, was fehlt (_anhaengen); wählt er Dateien
+    dazu, steht „Recherche nachgeladen“ mit genau diesen im Journal (der erste Eintrag ist unveränderlich).
+    → {anhaengen, recherche}."""
+    z = ki.zeile(lid)
+    if not z or z["art"] != ART or (z["bezug"] != BEZUG_KATALOG and not _mid(z["bezug"])):
+        raise Abgelehnt(KEIN_KATALOG_LAUF, 404)
+    erg = ki.json_lesen(z["ergebnis_json"], {}) or {}
+    v = erg.get("vorschlag")
+    if z["status"] not in ("fertig", "uebernommen") or not v:
+        raise Abgelehnt("Es gibt keinen fertigen Vorschlag zum Übernehmen.", 409)
+    if erg.get("verworfen"):
+        raise Abgelehnt("Dieser Vorschlag ist verworfen.", 409)
+    # Ein neuerer Lauf hat diesen ersetzt und beim Start seine Dateien entfernt – er gilt nicht als übernommen (AB2).
+    if _neuerer(z):
+        raise Abgelehnt(ERSETZT, 409)
+    je_nr = {a["nr"]: a for a in v["ausfuehrungen"]}
+    nr = d.get("nr")
+    # Nur ganze Zahlen (nicht True, nicht 1.0 – die stünde sonst so in der Übernahme und im Journal).
+    if not _ganz(nr) or nr not in je_nr:
+        raise Abgelehnt("Unbekannte Ausführung im Vorschlag.")
+    a = je_nr[nr]
+    angeboten = {f["n"]: f for f in v["dateien"] if f.get("anbieten")}
+    dateien = d.get("dateien") or []
+    # Wie im Reiter: Dateien dieser Ausführung – laut Prüfung bzw. Recherche ihr zugeordnet oder keiner bestimmten.
+    if not isinstance(dateien, list) or any(
+            not _ganz(x) or x not in angeboten or angeboten[x]["art"] == "produktbild"
+            or (angeboten[x]["gehoert_zu"] and nr not in angeboten[x]["gehoert_zu"]) for x in dateien):
+        raise Abgelehnt(f"Ausführung {nr}: unbekannte oder nicht angebotene Datei gewählt.")
+    bild = wahr(d, "bild", "Bild übernehmen")
+    if bild and not (a.get("bild") and a["bild"] in angeboten):
+        raise Abgelehnt(f"Ausführung {nr}: zu ihr gibt es kein Bild.")
+    felder = d.get("felder") or []
+    if not isinstance(felder, list) or any(x not in katalog.PRODUKT_FELDER for x in felder):
+        raise Abgelehnt("„felder“: nur Felder des Produkts.")
+    pid = kennung(d.get("product_id"), "Produkt")
+    p = katalog.produkt(pid)
+    if (p["created_at"] or "") < (z["beendet_am"] or ""):
+        raise Abgelehnt("Dateien aus einer Recherche hängen nur an einem Produkt, das danach angelegt wurde.", 409)
+    mid = _mid(z["bezug"])
+    if mid:
+        m = db.query("SELECT status, product_id FROM mat_product_request WHERE id = ?", (mid,), one=True)
+        if not m or m["status"] != "eingepflegt" or m["product_id"] != pid:
+            raise Abgelehnt("Die Meldung dieser Recherche ist nicht mit diesem Produkt erledigt.", 409)
+    # Die Ausführung steht schon als anderes Produkt im Katalog: ihre Dateien gehören zu jenem (Prüfung Ablauf).
+    da = _im_katalog(v["gemeinsam"]["manufacturer"]["wert"], v["gemeinsam"]["model"]["wert"],
+                     a["felder"]["article_no"]["wert"])
+    if da and da["id"] != pid:
+        raise Abgelehnt(f"Ausführung {nr} steht schon im Katalog als „{da['name']}“.", 409)
+    jetzt = db.now()
+    with db.transaction(sofort=True):
+        z = ki.zeile(lid)
+        erg = ki.json_lesen(z["ergebnis_json"], {}) or {}
+        if z["status"] not in ("fertig", "uebernommen") or erg.get("verworfen"):
+            raise Abgelehnt("Der Vorschlag wurde zwischenzeitlich geändert. Bitte neu laden.", 409)
+        if _neuerer(z):
+            raise Abgelehnt(ERSETZT, 409)
+        ue = erg.get("uebernahme") or {"produkte": [], "am": jetzt}
+        eintrag = next((e for e in ue["produkte"] if e["product_id"] == pid), None)
+        # Ein Eintrag zu einem Produkt, das erst nach ihm entstand, meint ein gelöschtes mit wieder vergebener Kennung
+        # (O1) – er gilt nicht mehr, das neue Produkt bekommt einen eigenen.
+        if eintrag and p["created_at"] > (eintrag.get("am") or ue.get("am") or ""):
+            ue["produkte"].remove(eintrag)
+            eintrag = None
+        # Ein Produkt stammt aus genau einer Ausführung: Dateien einer anderen gehören nicht dazu.
+        if eintrag and eintrag["nr"] != nr:
+            raise Abgelehnt(f"Dieses Produkt wurde aus Ausführung {eintrag['nr']} angelegt.", 409)
+        neu = eintrag is None
+        if neu:
+            eintrag = {"nr": nr, "product_id": pid, "dateien": sorted(set(dateien)), "bild": a["bild"] if bild else None,
+                       "am": jetzt}
+            ue["produkte"].append(eintrag)
+            dazu = set(eintrag["dateien"]) | ({eintrag["bild"]} if eintrag["bild"] else set())
+        else:
+            dazu = set(dateien) - set(eintrag["dateien"])
+            if bild and not eintrag.get("bild"):
+                dazu.add(a["bild"])
+            eintrag["dateien"] = sorted(set(eintrag["dateien"]) | set(dateien))
+            eintrag["bild"] = eintrag.get("bild") or (a["bild"] if bild else None)
+        if mid:
+            ue.setdefault("haupt", pid)
+        erg["uebernahme"] = ue
+        db.execute("UPDATE ki_laeufe SET status = 'uebernommen', ergebnis_json = ? WHERE id = ?",
+                   (json.dumps(erg, ensure_ascii=False), lid))
+        # Journal: beim ersten Aufruf je Produkt „Recherche übernommen“, kommen später Dateien dazu, „Recherche
+        # nachgeladen“ mit genau diesen – eine bloße Wiederholung (Teilfehler) schreibt nichts.
+        if neu or dazu:
+            je_n = {f["n"]: f for f in v["dateien"]}
+            journal.eintragen(*(("recherche", mid) if mid else ("ki_lauf", lid)),
+                              "recherche_uebernommen" if neu else "recherche_nachgeladen", None, {
+                                  "ki_lauf": lid, "produkte": [pid], "ausfuehrung": nr,
+                                  **({"felder": sorted(set(felder))} if neu else {}),
+                                  "dateien": [f"{DOKUMENT_NAMEN.get(je_n[n]['art'], je_n[n]['art'])}: "
+                                              f"{je_n[n]['sha256']}" for n in sorted(dazu)]})
+    return {"anhaengen": _anhaengen(lid, [eintrag], v, eintrag.get("am") or ue.get("am") or jetzt),
+            "recherche": status_json(ki.zeile(lid))}
+
+
+def _ganz(x):
+    """Eine ganze Zahl aus JSON – nicht True/False (bool ist in Python eine Zahl) und nicht 1.0."""
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
 def _anhaengen(lauf_id, produkte, v, am):
     """Die gewählten Dateien je Produkt über katalog.dokument_anlegen (Dokumente; derselbe Inhalt liegt nur einmal auf
     der Platte) bzw. katalog.produkt_bild_setzen (Bild) – dieselben Prüfungen wie ein Upload. Idempotent, auch bei zwei
@@ -1624,28 +1968,52 @@ def meldung_erledigt(mid):
         ki.abbrechen(z["id"])
 
 
+def konto_geloescht(uid):
+    """In der Transaktion von api_admin.delete_user (vor ki.konto_loeschen): Ein laufender Lauf ohne Meldung dieses
+    Kontos bekommt das Abbruch-Kennzeichen. Eingabe und Vorschlag bleiben stehen (C6 A – sie enthalten keine
+    Personendaten; den Namen macht ki.konto_loeschen zu „(gelöschtes Konto)“, gestartet_von setzt die Datenbank auf
+    NULL). Liefert die Kennungen seiner Läufe ohne Meldung – ihre Ordner entfernt erst konto_geloescht_nachher nach dem
+    COMMIT: Scheitert die Löschung, bleibt alles, wie es war (Muster dev-zuruecksetzen)."""
+    ids = [r["id"] for r in db.query("SELECT id FROM ki_laeufe WHERE art = ? AND bezug = ? AND gestartet_von = ?",
+                                     (ART, BEZUG_KATALOG, uid))]
+    for lid in ids:
+        ki.abbruch_kennzeichnen(lid)
+    return ids
+
+
+def konto_geloescht_nachher(ids):
+    """Nach dem COMMIT der Kontolöschung: die Dateien der Läufe ohne Meldung des Kontos sofort weg (C5 A), ein Lauf in
+    diesem Arbeitsprozess erfährt den Abbruch sofort (in einem anderen mit dem nächsten Lebenszeichen)."""
+    for lid in ids:
+        ki.abbruch_melden(lid)
+        ki.ordner_entfernen(lid)
+
+
 def aufraeumen():
-    """Tageslauf: tote Läufe und verwaiste Ordner (ki.aufraeumen); die Dateien fertiger Läufe AUFHEBEN_TAGE nach dem
-    Erledigen der Meldung, sofort, wenn es die Meldung nicht mehr gibt oder ein neuerer Lauf sie ersetzt hat. Wirft
-    nie."""
+    """Tageslauf: tote Läufe und verwaiste Ordner (ki.aufraeumen); die Dateien fertiger Läufe einer Meldung
+    AUFHEBEN_TAGE nach ihrem Erledigen, sofort, wenn es die Meldung nicht mehr gibt oder ein neuerer Lauf sie ersetzt
+    hat. Läufe ohne Meldung (C5 A): AUFHEBEN_TAGE nach ihrem Ende, sofort, wenn ein neuerer eigener ohne Meldung da ist,
+    wenn sie verworfen sind oder ihr Konto gelöscht ist. Wirft nie."""
     try:
         ki.aufraeumen()
         basis = os.path.join(current_app.config["DATA_DIR"], ki.ORDNER)
         if not os.path.isdir(basis):
             return
-        from datetime import datetime, timedelta, timezone
-        frist = (datetime.now(timezone.utc) - timedelta(days=AUFHEBEN_TAGE)).replace(microsecond=0).isoformat()
+        frist = _frist()
         for name in os.listdir(basis):
             if not name.isdigit():
                 continue
             z = ki.zeile(int(name))
             if not z or z["art"] != ART or z["status"] not in ("fertig", "uebernommen"):
                 continue
+            if z["bezug"] == BEZUG_KATALOG:
+                if (z["gestartet_von"] is None or _neuerer(z) or _abgelaufen(z, frist)
+                        or (ki.json_lesen(z["ergebnis_json"], {}) or {}).get("verworfen")):
+                    ki.ordner_entfernen(z["id"])
+                continue
             mid = _mid(z["bezug"])
             m = db.query("SELECT status, resolved_at FROM mat_product_request WHERE id = ?", (mid,), one=True)
-            neuer = db.query("SELECT 1 FROM ki_laeufe WHERE art = ? AND bezug = ? AND id > ? LIMIT 1",
-                             (ART, z["bezug"], z["id"]), one=True)
-            if not m or neuer or (m["status"] != "offen" and (m["resolved_at"] or "") < frist):
+            if not m or _neuerer(z) or (m["status"] != "offen" and (m["resolved_at"] or "") < frist):
                 ki.ordner_entfernen(z["id"])
     except Exception as exc:                        # noqa: BLE001 – der Tageslauf soll daran nicht scheitern
         current_app.logger.warning("Recherche: Aufräumen gescheitert: %s", exc)

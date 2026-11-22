@@ -98,6 +98,8 @@ FELD = {
     # Recherche per Claude API an einer Produktmeldung (21.11.2026, entity „recherche“)
     "domains": "Herstellerseiten", "bemerkung_mit": "Bemerkung mitgeschickt", "ki_modell": "Modell (Claude API)",
     "effort": "Aufwand", "ki_lauf": "Recherche Nr.", "belegt": "vorbelegte Felder", "produkte": "Produkte",
+    # Recherche im Produktdialog (22.11.2026, „Recherche übernommen“ nach „Anlegen“)
+    "ausfuehrung": "Ausführung", "felder": "übernommene Felder",
 }
 AKTION = {
     "angelegt": "angelegt", "geaendert": "geändert", "geloescht": "gelöscht", "verschoben": "verschoben",
@@ -150,11 +152,13 @@ AKTION = {
     "standard_gesetzt": "Standard-Prüfformular gesetzt", "standard_geloest": "Standard-Prüfformular gelöst",
     # Recherche per Claude API an einer Produktmeldung (21.11.2026)
     "recherche_gestartet": "Recherche gestartet", "recherche_beendet": "Recherche beendet",
-    "recherche_uebernommen": "Recherche übernommen",
+    "recherche_uebernommen": "Recherche übernommen", "recherche_nachgeladen": "Recherche nachgeladen",
 }
 ENTITAET = {"item": "Artikel", "product": "Produkt", "document": "Dokument", "form": "Formular", "folder": "Ordner",
             "category": "Kategorie", "user": "Konto", "inspection": "Prüfung", "round": "Durchgang",
-            "request": "Produktmeldung", "formular": "Prüfformular", "recherche": "Recherche (Claude API)"}
+            "request": "Produktmeldung", "formular": "Prüfformular", "recherche": "Recherche (Claude API)",
+            # Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog, 22.11.2026) – Kennung des Laufs
+            "ki_lauf": "Recherche (Claude API)"}
 # Wie PRUEFART_KURZ in material.js: im Journal kurz („periodisch“ statt „periodische Prüfung“).
 PRUEFART_KURZ = PRUEFARTEN
 SPERRZUSTAND = {"frei": "frei", "gesperrt": "gesperrt", "verloren": "verloren (gesperrt)", "ausgesondert": "ausgesondert"}
