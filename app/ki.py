@@ -35,6 +35,7 @@ wer sieht – hier gibt es keine Routen."""
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import threading
@@ -147,6 +148,23 @@ def _schluessel_weg(text):
         if k:
             text = text.replace(k, "***")
     return text
+
+
+_GESPERRT = re.compile(r"not accessible to our user agent:\s*\[([^\]]*)\]")
+
+
+def gesperrte_domains(exc):
+    """Die Domains einer Ablehnung (400), weil web_fetch sie nicht abrufen darf – Anthropic prüft allowed_domains vor
+    dem Lauf (etwa web.archive.org: „The following domains are not accessible to our user agent: ['…']“, 23.11.2026).
+    Leer bei jeder anderen Ausnahme. Gelesen wird die Meldung aus dem Rumpf der Antwort (exc.message ist dessen repr,
+    darin stehen Anführungszeichen je nach Inhalt maskiert)."""
+    if getattr(exc, "status_code", None) != 400:
+        return []
+    rumpf = getattr(exc, "body", None)
+    fehler = rumpf.get("error") if isinstance(rumpf, dict) else None
+    text = fehler.get("message") if isinstance(fehler, dict) else None
+    m = _GESPERRT.search(text if isinstance(text, str) else str(getattr(exc, "message", None) or exc))
+    return [d.strip().lower() for d in re.findall(r"['\"]([^'\"\\]+)\\?['\"]", m.group(1))] if m else []
 
 
 def fehlertext(exc, lauf_id=None):
@@ -536,6 +554,12 @@ class Lauf:
     @property
     def ordner(self):
         return ordner(self.id)
+
+    def eingabe_speichern(self):
+        """Die Eingabe nach einer Änderung im Lauf zurückschreiben – eingabe_json bleibt der Nachweis dessen, was
+        hinausging. Eine inzwischen geleerte Zeile (leeren) bleibt leer."""
+        db.execute("UPDATE ki_laeufe SET eingabe_json = ? WHERE id = ? AND eingabe_json != '{}'",
+                   (json.dumps(self.eingabe, ensure_ascii=False, sort_keys=True), self.id))
 
     def client(self):
         if self._client is None:

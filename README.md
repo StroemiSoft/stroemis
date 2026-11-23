@@ -662,7 +662,11 @@ der API und bleibt erreichbar.
   die Dokumente selbst; nur https auf Port 443, nur die bestätigten Herstellerdomains und ihre Archivstände bei
   `web.archive.org`, keine privaten Adressen (auch nicht über NAT64), höchstens 3 Weiterleitungen, 60 s – auch gegen
   Server, die Byte für Byte tröpfeln – und 50 MB je Datei). Gemeinsame Endungen wie github.io oder co.uk sind keine
-  Herstellerdomain; eine Domain aus einem Link der Meldung kennzeichnet der Startdialog.
+  Herstellerdomain; eine Domain aus einem Link der Meldung kennzeichnet der Startdialog. Claude selbst liest Seiten
+  (`web_fetch`) nur von den Herstellerdomains und den Domains der Links – `web.archive.org` lehnt Anthropic dafür ab
+  (400 „not accessible to our user agent“, seit dem 23.11.2026 nicht mehr in der Liste), Archivstände lädt nur der
+  Server. Lehnt Anthropic so eine weitere Domain ab, läuft die Recherche ohne sie neu (in der Eingabe als
+  `abruf_gesperrt`, im Vorschlag als Hinweis).
 - **Ablauf und Kosten:** Ein Lauf dauert Minuten (Hintergrund im Arbeitsprozess, Lebenszeichen alle 10 s; nach einem
   Neustart gilt er nach 120 s als abgebrochen; höchstens 20 Minuten). Je Lauf eine Recherche (Websuche höchstens 8,
   Abrufe höchstens 12, Effort `high`, Ausweichmodell nach einer Ablehnung) und je PDF eine Dokumentprüfung. Die Kosten
@@ -1583,7 +1587,7 @@ python tests/test_material_globalsuche.py  # Phase 2: globale Seriennummernsuche
 python tests/test_ki.py                  # Läufe über die Claude API (app/ki.py): Tabelle, Kosten, Kontingent, Gesprächsschleife,
                                         # Abbruch, tote Läufe, Fehlerkette – Attrappe und echter SDK-Client gegen MockTransport, kein Netz
 python tests/test_material_recherche.py  # Recherche an Produktmeldungen: Downloads (lokaler HTTPS-Server, SSRF), ganzer Lauf, Vorschlag,
-                                        # Mehrfach-Übernahme, Nachladen, Rechte, Wechselwirkungen
+                                        # Mehrfach-Übernahme, Nachladen, Rechte, Wechselwirkungen, von Anthropic gesperrte Domains
 python tests/test_material_recherche_robust.py  # Recherche: tröpfelnder Server, Adressen, Fotos, „unklar“, Ausweichen, Wettläufe,
                                         # gleichzeitiges Nachladen, tote Läufe, Domains (Nachbesserung 21.11.2026)
 python tests/test_material_recherche_reiter.py  # Recherche als Reiter im Produktdialog: Start ohne Meldung, eigener Lauf,

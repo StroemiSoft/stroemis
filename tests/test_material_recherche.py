@@ -488,7 +488,7 @@ def test_lauf_und_uebernahme():
                 and erste["system"][0]["cache_control"] == {"type": "ephemeral"}, sorted(erste)
             werkzeuge = {w["name"]: w for w in erste["tools"]}
             assert werkzeuge["web_search"] == {"type": "web_search_20260209", "name": "web_search", "max_uses": 8}
-            assert werkzeuge["web_fetch"]["allowed_domains"] == ["haendler.test", "hersteller.test", "web.archive.org"] \
+            assert werkzeuge["web_fetch"]["allowed_domains"] == ["haendler.test", "hersteller.test"] \
                 and werkzeuge["web_fetch"]["max_uses"] == 12
             assert werkzeuge["ergebnis_abgeben"]["eager_input_streaming"] is True \
                 and "strict" not in werkzeuge["ergebnis_abgeben"]
@@ -935,6 +935,115 @@ class SimpleServer:
         return f"https://{host}{pfad}"
 
 
+def abgelehnt_400(meldung):
+    """Eine echte BadRequestError des SDK (MockTransport, kein Netz) mit dieser Meldung der Schnittstelle."""
+    import anthropic
+    import httpx2
+    from test_ki import _echter_client
+    client = _echter_client(lambda _r: httpx2.Response(400, headers={"request-id": "req_probe"}, json={
+        "type": "error", "error": {"type": "invalid_request_error", "message": meldung}}), [])
+    try:
+        with client.beta.messages.stream(model="claude-opus-5-5", max_tokens=10,
+                                         messages=[{"role": "user", "content": "x"}]) as s:
+            s.get_final_message()
+    except anthropic.BadRequestError as exc:
+        return exc
+    raise AssertionError("Die Attrappe hat keine 400 geliefert.")
+
+
+GESPERRT = "The following domains are not accessible to our user agent: [{}]. Read more: https://support.anthropic.com/x"
+
+
+def test_von_anthropic_gesperrte_domains():
+    """23.11.2026 auf dev: Anthropic lehnt web.archive.org in allowed_domains von web_fetch mit 400 ab. Das Webarchiv
+    geht deshalb nicht mehr hinaus; lehnt Anthropic eine weitere Domain so ab, läuft der Aufruf ohne sie neu (vermerkt
+    in der Eingabe und als Hinweis im Vorschlag), ohne abrufbare Domain ganz ohne web_fetch. Jede andere 400 bleibt
+    ein Fehler."""
+    from app import ki
+    from app.material.services import meldung
+    import anthropic
+    # Die Meldung der Schnittstelle, wie sie das SDK liefert – und nur sie.
+    exc = abgelehnt_400(GESPERRT.format("'web.archive.org', \"Hersteller.test\""))
+    assert ki.gesperrte_domains(exc) == ["web.archive.org", "hersteller.test"], str(exc)
+    assert ki.gesperrte_domains(abgelehnt_400("max_tokens: too large")) == []
+    assert ki.gesperrte_domains(ValueError(GESPERRT.format("'a.test'"))) == []
+    assert issubclass(anthropic.BadRequestError, anthropic.APIStatusError)
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["ANTHROPIC_API_KEY"] = SCHLUESSEL
+        os.environ.pop("MATERIAL_RECHERCHE_JE_MONAT", None)
+        server, _bild = netz_server(tmp)
+        alt_netz = netz_einsetzen(server)
+        alt_mail = mails_abfangen(meldung)
+        try:
+            app, k = umgebung(os.path.join(tmp, "daten"))
+            ids = katalog_grund(k["adm"])
+            gid, _ = gliederung(k["wart"])
+            kat = k["katalog"]
+            mid = melden(k, gid)
+            basis = f"/api/material/meldungen/{mid}/recherche"
+
+            def lauf(*vorweg):
+                """Ein Lauf, dessen erste Anfragen mit den Ausnahmen in vorweg scheitern; danach die übliche Probe."""
+                normal = antworter(server, ids["gurte"], {"geprueft": []})
+                a = Attrappe(lambda anf, nr: vorweg[nr] if nr < len(vorweg) else normal(anf, nr - len(vorweg)))
+                alt = einsetzen(a)
+                try:
+                    r = kat.post(basis, json={"domains": ["hersteller.test"]}, headers=H)
+                    assert r.status_code == 202, r.get_json()
+                    z = warten(mid, app)
+                finally:
+                    ki.CLIENT = alt
+                return a, z
+
+            # Ohne Webarchiv: abrufbar sind nur die Herstellerdomain und die Domain eines Links der Meldung.
+            a, z = lauf()
+            assert z["status"] == "fertig", dict(z)
+            erste = {w["name"]: w for w in a.anfragen[0]["tools"]}
+            assert erste["web_fetch"]["allowed_domains"] == ["haendler.test", "hersteller.test"], erste["web_fetch"]
+            anweisung = a.anfragen[0]["system"][0]["text"]
+            assert "kann web_fetch nicht lesen" in anweisung and "der Server lädt sie selbst" in anweisung
+            assert "abruf_gesperrt" not in json.loads(z["eingabe_json"])
+
+            # Anthropic sperrt die Herstellerdomain: ein Neuversuch ohne sie, vermerkt, Hinweis im Vorschlag.
+            a, z = lauf(abgelehnt_400(GESPERRT.format("'hersteller.test'")))
+            assert z["status"] == "fertig", dict(z)
+            zweite = {w["name"]: w for w in a.anfragen[1]["tools"]}
+            assert zweite["web_fetch"]["allowed_domains"] == ["haendler.test"], zweite["web_fetch"]
+            assert len(a.anfragen[1]["messages"]) == 1, "Der Neuversuch beginnt von vorn."
+            nutzer = a.anfragen[1]["messages"][0]["content"][-1]["text"]
+            assert "nicht abrufen (von Anthropic gesperrt): hersteller.test." in nutzer, nutzer
+            eingabe = json.loads(z["eingabe_json"])
+            assert eingabe["abruf_domains"] == ["haendler.test"] and eingabe["abruf_gesperrt"] == ["hersteller.test"] \
+                and eingabe["domains"] == ["hersteller.test"], eingabe
+            st = kat.get(basis).json["recherche"]
+            assert st["eingabe"]["abruf_gesperrt"] == ["hersteller.test"], st["eingabe"]
+            assert any(h.startswith("Anthropic sperrt den Abruf von hersteller.test") for h in st["vorschlag"]["hinweise"]), \
+                st["vorschlag"]["hinweise"]
+            # Der Server lädt die Dateien von der Herstellerdomain trotzdem selbst.
+            assert any(f["datei"] and "hersteller.test" in f["url"] for f in st["vorschlag"]["dateien"])
+
+            # Nacheinander beide Domains gesperrt: zuletzt ganz ohne web_fetch.
+            a, z = lauf(abgelehnt_400(GESPERRT.format("'hersteller.test'")),
+                        abgelehnt_400(GESPERRT.format("'haendler.test'")))
+            assert z["status"] == "fertig", dict(z)
+            assert [w["name"] for w in a.anfragen[2]["tools"]] == ["web_search", "ergebnis_abgeben"], a.anfragen[2]
+            eingabe = json.loads(z["eingabe_json"])
+            assert eingabe["abruf_domains"] == [] and eingabe["abruf_gesperrt"] == ["haendler.test", "hersteller.test"]
+
+            # Eine andere 400, oder eine gesperrte Domain, die gar nicht hinausging: Fehler, kein Neuversuch.
+            for anders in (abgelehnt_400("tools.1: unknown field"), abgelehnt_400(GESPERRT.format("'web.archive.org'"))):
+                a, z = lauf(anders)
+                assert z["status"] == "fehlgeschlagen" and len(a.anfragen) == 1 \
+                    and z["fehler"] == "Die Schnittstelle hat die Anfrage abgelehnt – Einzelheiten stehen im " \
+                                       "Protokoll des Servers.", dict(z)
+                assert "abruf_gesperrt" not in json.loads(z["eingabe_json"])
+        finally:
+            mails_zurueck(alt_mail)
+            netz_zurueck(alt_netz)
+            server.stop()
+    print("Von Anthropic gesperrte Domains bestanden.")
+
+
 def test_statisch():
     """Übung: GET /meldungen der Übung nennt keine Recherche (kein Knopf); Beschriftungen in Python und JS gleich."""
     wurzel = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1018,5 +1127,6 @@ if __name__ == "__main__":
     test_zusammenfuehren_regeln()
     test_lauf_und_uebernahme()
     test_rechte_und_wechselwirkungen()
+    test_von_anthropic_gesperrte_domains()
     test_statisch()
     test_oberflaeche_statisch()

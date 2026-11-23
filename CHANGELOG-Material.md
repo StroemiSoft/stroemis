@@ -14533,3 +14533,26 @@ Browser.
 mit geleertem Lauf, Kontolöschung und wieder vergebener Kennung, AB1, AB4, AB2 ohne und mit Meldung);
 `test_aufraeumen_konto_tote` mit laufendem Lauf und künstlich scheiternder Löschung; `test_oberflaeche_statisch` für
 AB2, AB4, AB5, S2 und O1–O9.
+
+## Recherche per Claude API: kein Webarchiv mehr bei `web_fetch` (Fehler, 23.11.2026)
+
+Auf dev hat die Schnittstelle jede Recherche gleich beim ersten Aufruf abgelehnt: „The following domains are not
+accessible to our user agent: ['web.archive.org']“ (400) – Anthropic lässt `web.archive.org` in `allowed_domains` von
+`web_fetch` nicht zu. Der Fehler kam erst mit dem echten Schlüssel ans Licht, die Attrappen der Tests prüfen das nicht.
+
+- **Abrufbar für Claude** sind nur noch die bestätigten Herstellerdomains und die Domains der Links der Meldung. Die
+  Anweisung sagt, dass `web_fetch` das Webarchiv nicht lesen kann: Hat der Hersteller ein Dokument nicht mehr, nennt
+  Claude seine Archivadresse, und der Server lädt sie selbst – wie bisher nur mit dem Original auf einer Herstellerdomain
+  und in der Roh-Fassung (`recherche_netz.py` unverändert).
+- **Weitere gesperrte Domain:** Lehnt Anthropic schon die erste Anfrage so ab und steht die Domain in der Liste, läuft
+  der Aufruf ohne sie neu (`ki.gesperrte_domains` liest die Domains aus dem Rumpf der Antwort; jeder Neuversuch hat
+  weniger Domains). Vermerkt in der Eingabe als `abruf_gesperrt` (`Lauf.eingabe_speichern`, eingabe_json bleibt der
+  Nachweis), in der Nachricht an Claude („von Anthropic gesperrt“) und im Vorschlag als Hinweis „Anthropic sperrt den
+  Abruf von …“. Bleibt keine Domain, geht die Anfrage ohne `web_fetch` hinaus. Jede andere 400 bleibt ein Fehler.
+
+**Tests:** `test_material_recherche.py` – neu `test_von_anthropic_gesperrte_domains` (echte 400 des SDK über
+MockTransport; Liste ohne Webarchiv, Neuversuch ohne die Herstellerdomain, nacheinander zwei gesperrt bis ohne
+`web_fetch`, andere 400 und nicht gesendete Domain ohne Neuversuch); die Erwartungen an `allowed_domains` in
+`test_material_recherche.py`, `test_material_recherche_reiter.py` und `test_ki.py` ohne `web.archive.org`.
+`test_aufraeumen_konto_tote` vergleicht den laufenden Lauf ohne Phase und Fortschritt – was der Thread selbst schreibt,
+machte den Test auf GitHub wacklig (Lauf auf `dev` vom 22.11.2026 rot).
