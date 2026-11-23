@@ -14554,3 +14554,5 @@ accessible to our user agent: ['web.archive.org']“ (400) – Anthropic lässt 
 MockTransport; Liste ohne Webarchiv, Neuversuch ohne die Herstellerdomain, nacheinander zwei gesperrt bis ohne
 `web_fetch`, andere 400 und nicht gesendete Domain ohne Neuversuch); die Erwartungen an `allowed_domains` in
 `test_material_recherche.py`, `test_material_recherche_reiter.py` und `test_ki.py` ohne `web.archive.org`.
+`test_aufraeumen_konto_tote` vergleicht den laufenden Lauf ohne Phase und Fortschritt – was der Thread selbst schreibt,
+machte den Test auf GitHub wacklig (Lauf auf `dev` vom 22.11.2026 rot).

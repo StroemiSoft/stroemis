@@ -762,11 +762,14 @@ def test_aufraeumen_konto_tote():
                     pass
             finally:
                 start.konto_vergessen = alt_vergessen
+            # Was ein laufender Lauf selbst schreibt (Lebenszeichen, Status, Phase), zählt nicht – sonst hinge der
+            # Vergleich davon ab, ob der Thread vor oder nach „vorher“ seinen ersten Schritt meldet (rot auf GitHub
+            # am 22.11.2026).
+            lebt = dict.fromkeys(("lebenszeichen_am", "status", "phase", "fortschritt"))
             with app.app_context():
                 assert db.query("SELECT 1 FROM users WHERE id = ?", (uid2,), one=True)
                 for n in (fertig2, laeuft):
-                    assert dict(ki.zeile(n)) | {"lebenszeichen_am": None, "status": None} \
-                        == vorher[n] | {"lebenszeichen_am": None, "status": None}, n
+                    assert dict(ki.zeile(n)) | lebt == vorher[n] | lebt, (n, dict(ki.zeile(n)), vorher[n])
                 assert os.path.isdir(ki.ordner(fertig2)) and os.path.isdir(ki.ordner(laeuft))
                 assert ki.zeile(laeuft)["status"] in ki.LAUFEND and not ki.zeile(laeuft)["abbrechen"]
             assert not strom.geschlossen.wait(0.3)            # der Lauf läuft weiter
