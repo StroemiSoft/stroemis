@@ -1031,11 +1031,13 @@ def test_von_anthropic_gesperrte_domains():
             assert eingabe["abruf_domains"] == [] and eingabe["abruf_gesperrt"] == ["haendler.test", "hersteller.test"]
 
             # Eine andere 400, oder eine gesperrte Domain, die gar nicht hinausging: Fehler, kein Neuversuch.
-            for anders in (abgelehnt_400("tools.1: unknown field"), abgelehnt_400(GESPERRT.format("'web.archive.org'"))):
-                a, z = lauf(anders)
+            # Der Anfang der Meldung steht in der Statuszeile (seit dem 23.11.2026, ki.fehlertext).
+            for meldung in ("tools.1: unknown field", GESPERRT.format("'web.archive.org'")):
+                a, z = lauf(abgelehnt_400(meldung))
                 assert z["status"] == "fehlgeschlagen" and len(a.anfragen) == 1 \
-                    and z["fehler"] == "Die Schnittstelle hat die Anfrage abgelehnt – Einzelheiten stehen im " \
-                                       "Protokoll des Servers.", dict(z)
+                    and z["fehler"] == f"Die Schnittstelle hat die Anfrage abgelehnt: „{meldung}“ (mehr im Protokoll " \
+                                       "des Servers).", dict(z)
+                assert kat.get(basis).json["recherche"]["fehler"] == z["fehler"]
                 assert "abruf_gesperrt" not in json.loads(z["eingabe_json"])
         finally:
             mails_zurueck(alt_mail)

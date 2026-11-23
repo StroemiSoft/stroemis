@@ -674,6 +674,10 @@ der API und bleibt erreichbar.
   „Schätzung“; brach eine Antwort mitten im Stream ab, „mindestens ca. … $“). Abbrechen und Zeitgrenze wirken sofort,
   auch mitten in einer Antwort oder einem Download. Je Lauf steht im Container-Log „KI-Lauf n: größter Abstand zwischen
   zwei Ereignissen des Streams … s“ – Grundlage, um die Lese-Zeitgrenze (600 s) nach einer Messung auf dev zu senken.
+  Lehnt die Schnittstelle einen Aufruf ab (400 – etwa Guthaben oder Monatslimit des Arbeitsbereichs, in der Console
+  abgeschaltete Websuche, Parameterfehler), zeigt die Statuszeile seit dem 23.11.2026 den Anfang der Meldung (eine
+  Zeile, höchstens 200 Zeichen, ohne Schlüssel); Klasse, Status und Anfragekennung stehen im Container-Log („KI-Lauf n:
+  BadRequestError …“).
   Werte gelten nur als „belegt“, wenn Claude die Seite wirklich abgerufen hat oder der Server die Datei geladen hat;
   Werte aus einem Dokument, das die Prüfung nicht sicher zuordnet, werden nicht vorbelegt. Keine Batches, keine Mails.
 - **Dateien:** `DATA_DIR/ki/<Lauf>/` (0700/0600). Weg, sobald ein Lauf scheitert oder abbricht, ein neuer ihn ersetzt

@@ -151,26 +151,49 @@ def _schluessel_weg(text):
 
 
 _GESPERRT = re.compile(r"not accessible to our user agent:\s*\[([^\]]*)\]")
+_SCHLUESSEL_ART = re.compile(r"sk-ant-[\w-]+")
+MELDUNG_ZEICHEN = 200                  # so viel vom Anfang der Meldung einer 400 zeigt die Anzeige
+
+
+def _rumpf_meldung(exc):
+    """error.message aus dem Rumpf der Antwort – oder None (exc.message ist das repr des ganzen Rumpfs, darin stehen
+    Anführungszeichen je nach Inhalt maskiert)."""
+    rumpf = getattr(exc, "body", None)
+    fehler = rumpf.get("error") if isinstance(rumpf, dict) else None
+    text = fehler.get("message") if isinstance(fehler, dict) else None
+    return text if isinstance(text, str) else None
 
 
 def gesperrte_domains(exc):
     """Die Domains einer Ablehnung (400), weil web_fetch sie nicht abrufen darf – Anthropic prüft allowed_domains vor
     dem Lauf (etwa web.archive.org: „The following domains are not accessible to our user agent: ['…']“, 23.11.2026).
-    Leer bei jeder anderen Ausnahme. Gelesen wird die Meldung aus dem Rumpf der Antwort (exc.message ist dessen repr,
-    darin stehen Anführungszeichen je nach Inhalt maskiert)."""
+    Leer bei jeder anderen Ausnahme. Gelesen wird die Meldung aus dem Rumpf der Antwort (_rumpf_meldung)."""
     if getattr(exc, "status_code", None) != 400:
         return []
-    rumpf = getattr(exc, "body", None)
-    fehler = rumpf.get("error") if isinstance(rumpf, dict) else None
-    text = fehler.get("message") if isinstance(fehler, dict) else None
-    m = _GESPERRT.search(text if isinstance(text, str) else str(getattr(exc, "message", None) or exc))
+    text = _rumpf_meldung(exc)
+    m = _GESPERRT.search(text if text is not None else str(getattr(exc, "message", None) or exc))
     return [d.strip().lower() for d in re.findall(r"['\"]([^'\"\\]+)\\?['\"]", m.group(1))] if m else []
 
 
+def _meldung_kurz(exc):
+    """Der Anfang der Meldung einer Ablehnung (400) für die Anzeige: nur error.message aus dem Rumpf (nie die
+    Rohantwort), in einer Zeile, ohne Steuerzeichen und ohne Schlüssel (den geltenden, den aus der .env und alles, was
+    wie einer aussieht), höchstens MELDUNG_ZEICHEN Zeichen. Leer, wenn die Antwort keine solche Meldung trägt –
+    gekürzt wird erst nach dem Unkenntlichmachen, sonst bliebe ein halber Schlüssel stehen."""
+    text = _rumpf_meldung(exc)
+    if not text:
+        return ""
+    text = _SCHLUESSEL_ART.sub("***", _schluessel_weg(text))
+    text = " ".join("".join(z if z.isprintable() else " " for z in text).split())
+    return text if len(text) <= MELDUNG_ZEICHEN else text[:MELDUNG_ZEICHEN - 1].rstrip() + "…"
+
+
 def fehlertext(exc, lauf_id=None):
-    """Eine Ausnahme des SDK als Satz für die Anzeige – ohne Schlüssel, ohne Rohantwort. Ins Protokoll kommen Klasse,
-    Status und Anfragekennung (request-id), bei 400 dazu der Anfang der Meldung (Parameterfehler lassen sich sonst
-    nicht finden). Spezifische Klassen zuerst (die Kette der SDK-Doku)."""
+    """Eine Ausnahme des SDK als Satz für die Anzeige – ohne Schlüssel, ohne Rohantwort. Bei 400 steht der Anfang der
+    Meldung der Schnittstelle dabei (_meldung_kurz; seit dem 23.11.2026 – Guthaben, Monatslimit, abgeschaltete
+    Websuche oder ein Parameterfehler ließen sich sonst nur mit Zugang zum Server unterscheiden). Ins Protokoll kommen
+    Klasse, Status und Anfragekennung (request-id), bei 400 dazu der Anfang der Meldung. Spezifische Klassen zuerst (die
+    Kette der SDK-Doku)."""
     try:
         import anthropic
     except ImportError:                       # ohne Paket kommt keine Ausnahme des SDK zustande
@@ -191,6 +214,9 @@ def fehlertext(exc, lauf_id=None):
         if isinstance(exc, anthropic.NotFoundError):
             return "Modell oder Schnittstelle nicht gefunden."
         if isinstance(exc, anthropic.BadRequestError):
+            meldung = _meldung_kurz(exc)
+            if meldung:
+                return f"Die Schnittstelle hat die Anfrage abgelehnt: „{meldung}“ (mehr im Protokoll des Servers)."
             return "Die Schnittstelle hat die Anfrage abgelehnt – Einzelheiten stehen im Protokoll des Servers."
         if isinstance(exc, anthropic.RateLimitError):
             return "Ratenlimit oder Monatslimit der Schnittstelle erreicht – bitte später erneut versuchen."

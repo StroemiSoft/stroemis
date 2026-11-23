@@ -14556,3 +14556,26 @@ MockTransport; Liste ohne Webarchiv, Neuversuch ohne die Herstellerdomain, nache
 `test_material_recherche.py`, `test_material_recherche_reiter.py` und `test_ki.py` ohne `web.archive.org`.
 `test_aufraeumen_konto_tote` vergleicht den laufenden Lauf ohne Phase und Fortschritt – was der Thread selbst schreibt,
 machte den Test auf GitHub wacklig (Lauf auf `dev` vom 22.11.2026 rot).
+
+## Recherche per Claude API: Meldung einer Ablehnung in der Statuszeile (Wunsch, 23.11.2026)
+
+Bei den drei gescheiterten Läufen auf dev vom 22.11.2026 stand an der Meldung nur „Die Schnittstelle hat die Anfrage
+abgelehnt – Einzelheiten stehen im Protokoll des Servers.“ Ohne Zugang zum Server ließ sich die Ursache nicht finden;
+eine 400 der Schnittstelle kann ebenso ein aufgebrauchtes Guthaben, ein erreichtes Monatslimit, eine in der Console
+abgeschaltete Websuche oder ein Parameterfehler sein.
+
+- **Anzeige:** `ki.fehlertext` hängt bei einer 400 den Anfang der Meldung der Schnittstelle an: „Die Schnittstelle hat
+  die Anfrage abgelehnt: „…“ (mehr im Protokoll des Servers).“ – an der Statuszeile der Meldung und im Reiter
+  „Recherche“, im Journal („Recherche beendet“, Grund) und bei einer nicht geprüften Datei im Vorschlag. Die Oberfläche
+  ist unverändert, sie zeigt den Text wie bisher maskiert.
+- **Was gezeigt wird** (`ki._meldung_kurz`): nur `error.message` aus dem Rumpf der Antwort, nie die Rohantwort; in
+  einer Zeile, ohne Steuerzeichen, höchstens 200 Zeichen (`ki.MELDUNG_ZEICHEN`, danach „…“). Der geltende Schlüssel, der
+  aus der `.env` und alles, was wie ein Schlüssel aussieht (`sk-ant-…`), werden vor dem Kürzen zu „***“. Trägt die
+  Antwort keine lesbare Meldung (kein JSON, etwa von einem Proxy), bleibt der bisherige Satz.
+- **Unverändert:** alle anderen Status (401, 403, 404, 429, 402, 5xx, Netz) zeigen weiter nur ihren Satz, das
+  Protokoll des Servers führt Klasse, Status und Anfragekennung. Sehen kann den Text, wer den Lauf sieht – die
+  Material-Verwaltung.
+
+**Tests:** `test_ki.py` (`test_echter_client_und_fehlerkette`: Meldung nur bei 400; Kürzung, eine Zeile,
+Steuerzeichen, fremder Schlüssel, Schlüssel auf der Schnittkante, Antworten ohne lesbare Meldung);
+`test_material_recherche.py` (`test_von_anthropic_gesperrte_domains`: der Satz am Lauf und im Stand der Meldung).
