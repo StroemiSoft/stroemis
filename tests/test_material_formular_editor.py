@@ -341,9 +341,14 @@ def formular_anlegen(u, kategorie):
 def oeffnen(s, fid):
     s.oeffnen(f"/materialablage/katalog/formular/{fid}", warten=0.6)
     s.warte("!!document.querySelector('#fp-tabelle')")
-    # Angebot der Einführung und Hinweise beiseite – sie liegen sonst über Zeilen.
-    s.js("""(() => { const k = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Nicht jetzt');
-      if (k) k.click(); document.querySelectorAll('dialog[open]').forEach((d) => d.close()); })()""")
+    # Hinweise und das Angebot der Einführung beiseite – sie liegen sonst über Zeilen. Das Angebot erscheint erst, wenn
+    # kein Dialog mehr offen ist und das DOM 400 ms ruht (einfuehrung.js, angebotPlanen); ohne Warten kam es in der CI
+    # mitten im Ablauf und lag über einem Menüeintrag (21.11.2026).
+    s.js("document.querySelectorAll('dialog[open]').forEach((d) => d.close())")
+    if s.js("Boolean(((window.STROEMIS || {}).einfuehrung || {}).angebot?.length)") \
+            and s.warte("!!document.getElementById('einf-nicht-jetzt')", sek=4):
+        s.js("document.getElementById('einf-nicht-jetzt').click()")
+        assert s.warte("!document.querySelector('.einfuehrung-angebot')", sek=4), "Angebot der Einführung bleibt stehen"
     s.b.warten(0.3)
 
 

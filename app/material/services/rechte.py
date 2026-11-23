@@ -525,10 +525,15 @@ def darf_unterschreiben(user=None):
 def darf_alles(user=None):
     """Was die Oberfläche anbietet (data-darf) – „irgendwo“; am Objekt selbst steht „darf“ (rechte_ordner). Der Server
     prüft jede Aktion trotzdem selbst."""
+    from ... import ki
     user = user or current_user()
     s = sicht(user)
+    katalog = ist_material_verwaltung(user)
     return {"lesen": s.irgendwo("lesen"), "grund": s.irgendwo("grund"), "verwalten": s.irgendwo("verwalten"),
-            "pruefen": s.irgendwo("pruefen"), "katalog": ist_material_verwaltung(user), "alles": s.alles,
+            "pruefen": s.irgendwo("pruefen"), "katalog": katalog, "alles": s.alles,
+            # Reiter „Recherche“ im Produktdialog (22.11.2026): nur die Material-Verwaltung und nur mit API-Schlüssel
+            # (A3 A). In der Übung fehlt das Feld (einfuehrung.DARF_MATERIAL) – dort gibt es den Reiter nicht.
+            "recherche": bool(katalog and ki.verfuegbar()),
             "gliederung_anlegen": s.alles, "qualifiziert": s.qualifiziert,
             "uid": user["id"] if user else None,
             "urkundennummer": (user["urkundennummer"] or "") if user else "",

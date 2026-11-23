@@ -419,6 +419,122 @@ table.list.mat-artikel th.mat-wahlspalte, table.list.mat-artikel td.mat-wahlspal
 .mat-mstatus.m-offen { background: var(--co-info-fl); color: var(--wasser); box-shadow: inset 0 0 0 1px var(--wasser); }
 .mat-mstatus.m-eingepflegt { background: var(--co-success-fl); color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
 .mat-mstatus.m-abgelehnt { background: var(--rot); color: var(--weiss); }
+/* Recherche per Claude API an einer Meldung (21.11.2026): die Statuszeile unter der Knopfzeile – eine Zeile, kein
+   Kasten; „Vorschlag ansehen“ rechts daneben, am Telefon darunter. Die Dialoge „Vorschlag ansehen“ und „Produkte aus der
+   Recherche anlegen“ (.mat-vorschlag) sind breit; ihre Tabellen werden zu Karten, wenn der DIALOG schmaler als 640 px
+   ist (Container „vorschlag“, V4 der Browserprüfung vom 21.11.2026 – nicht schon bei 860 px Fensterbreite wie sonst
+   table.list in app.css); leere Zellen zeigen in der Tabelle „–“ und fehlen in der Karte (V3). Die Knopfzeile steht
+   als letztes Kind von .dlg-body und klebt am Finger (app.css) und bei schmalem Fenster unten (V3). */
+.mat-recherche-zeile { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; font-size: var(--fs-klein);
+  overflow-wrap: anywhere; }
+.mat-recherche-zeile .btn { font-size: var(--fs-klein); }
+.mat-recherche-zeile > span { max-width: 100ch; }
+.mat-recherche-bemerkung { margin: 0 0 4px; padding: 6px 10px; background: var(--grau-hell); }
+@media (min-width: 700px) { dialog:where(:has(.mat-vorschlag)) { width: min(1100px, 96vw); } }
+.mat-vorschlag h3 { margin: 18px 0 6px; }
+.mat-vorschlag h4 { margin: 0 0 4px; font-size: var(--fs-mittel); }
+.mat-vs-tabelle { width: 100%; table-layout: fixed; }
+.mat-vs-tabelle td { vertical-align: top; overflow-wrap: anywhere; }
+.mat-vs-tabelle:not(.mat-vs-dateien) th:nth-child(1) { width: 22%; }
+.mat-vs-tabelle:not(.mat-vs-dateien) th:nth-child(2) { width: 30%; }
+.mat-vs-dateien th:nth-child(1) { width: 26%; }
+.mat-vs-dateien th:nth-child(6) { width: 22%; }
+.mat-vs-dateien th:last-child { width: 88px; }
+.mat-vs-feld { font-weight: 600; }
+.mat-vorschlag { container: vorschlag / inline-size; }
+.mat-vorschlag h2:focus { outline: none; box-shadow: none; }       /* Fokus beim Öffnen und nach dem Wechsel (B1, V9) */
+.mat-vs-tabelle td:empty:not(.tabelle-aktionen)::after { content: "–"; color: var(--grau); }
+@media (max-width: 860px) {
+  table.list.mat-vs-tabelle { display: table; }
+  table.list.mat-vs-tabelle thead { display: table-header-group; }
+  table.list.mat-vs-tabelle tbody { display: table-row-group; }
+  table.list.mat-vs-tabelle tr { display: table-row; padding: 0; border-bottom: 0; }
+  table.list.mat-vs-tabelle td { display: table-cell; border-bottom: 1px solid var(--linie); padding: 8px; }
+  table.list.mat-vs-tabelle td[data-l]::before { content: none; }
+}
+@container vorschlag (max-width: 640px) {
+  table.list.mat-vs-tabelle, table.list.mat-vs-tabelle tbody, table.list.mat-vs-tabelle tr, table.list.mat-vs-tabelle td { display: block; }
+  table.list.mat-vs-tabelle thead { display: none; }
+  table.list.mat-vs-tabelle tr { padding: 10px 0 12px; border-bottom: 1px solid var(--linie); }
+  table.list.mat-vs-tabelle td { border: 0; padding: 2px 0; }
+  table.list.mat-vs-tabelle td[data-l]::before { content: attr(data-l) ": "; color: var(--grau); font-size: var(--fs-klein); }
+  table.list.mat-vs-tabelle td.tabelle-aktionen { padding-top: 8px; }
+  table.list.mat-vs-tabelle td:empty { display: none; }
+}
+@media (max-width: 640px) {
+  dialog .dlg-body:has(> .mat-vorschlag) { padding-bottom: 0; }
+  dialog .dlg-body:has(> .mat-vorschlag) > .dlg-actions:last-child { position: sticky; bottom: 0; z-index: 2; background: var(--weiss);
+    padding: 10px 0 20px; }
+}
+/* Steht unten die Leiste der Führung, endet der (mittig stehende) Dialog über ihr. */
+html.fuehrung-leiste dialog:has(.mat-vorschlag) .dlg-body { max-height: min(80dvh, calc(100dvh - 2 * var(--fuehrung-hoehe, 0px) - 16px)); }
+.mat-recherche-datenschutz p, .mat-recherche-datenschutz ul { margin: 0; }
+.mat-recherche-datenschutz ul { padding-left: 1.2em; }
+.mat-vorschlag textarea[data-einzeilig] { min-height: 0; resize: vertical; }     /* zwei Zeilen (rows=2), nicht 90 px */
+.mat-vs-adresse a { color: var(--grau); }
+.mat-vs-ausf { border-top: 1px solid var(--linie); padding: 10px 0 4px; }
+.mat-vs-ausf-kopf { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mat-vs-ausf-kopf p { margin: 0; }
+.mat-vs-bild { flex: none; }
+.mat-vs-bild img { display: block; width: 72px; height: 72px; object-fit: contain; background: var(--weiss); border: 1px solid var(--linie); }
+.mat-vs-liste { margin: 4px 0 8px; padding-left: 1.2em; overflow-wrap: anywhere; }
+.mat-beleg { display: inline-block; margin-top: 2px; font-size: var(--fs-marke); font-weight: 700; padding: 1px 8px; border-radius: var(--radius-pille);
+  background: var(--co-note-fl); color: var(--grau); box-shadow: inset 0 0 0 1px var(--linie); }
+.mat-beleg.b-hersteller { background: var(--co-success-fl); color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+.mat-beleg.b-webarchiv { background: var(--co-info-fl); color: var(--wasser); box-shadow: inset 0 0 0 1px var(--wasser); }
+.mat-beleg.b-nur_identifikation { background: var(--co-warning-fl); color: var(--anthrazit); box-shadow: inset 0 0 0 1px var(--gelb-dunkel); }
+.mat-fundstelle { overflow-wrap: anywhere; }
+.mat-ue-ausf { border: 1px solid var(--linie); padding: 6px 12px 10px; margin: 0 0 10px; min-width: 0; }
+.mat-ue-ausf legend { font-weight: 600; padding: 0 4px; }
+.mat-ue-ausf.aus > :not(legend, .mat-ue-an) { opacity: .55; }
+.mat-ue-ausf.nicht { color: var(--grau); }
+.mat-ue-bild img { width: 56px; height: 56px; object-fit: contain; border: 1px solid var(--linie); background: var(--weiss); }
+.mat-ue-nicht { margin: 6px 0; overflow-wrap: anywhere; }
+/* Reiter „Recherche“ im Produktdialog (22.11.2026): dieselben Bausteine wie „Vorschlag ansehen“ im schmalen
+   Produktdialog. Eigener Container (nicht .mat-vorschlag – das machte den ganzen Dialog breit, auch versteckt); die
+   Tabellen werden unter 640 px Reiterbreite zu Karten (Container „vorschlag“). Tippflächen regelt app.css unter
+   (pointer: coarse). */
+.mat-rs-vorschlag { container: vorschlag / inline-size; }
+.mat-rs-vorschlag h3 { margin: 18px 0 6px; }
+.mat-rs-kopf { margin: 0 0 8px; }
+.mat-rs-wahl { font-weight: 600; margin: 0 0 4px; }
+.mat-vs-ausf.nicht { color: var(--grau); }
+.mat-rs-neu { margin: 14px 0 4px; }
+.mat-rs-vorschlag .mat-recherche-stand:focus { outline: none; }
+.mat-rs-fehler:empty { display: none; }
+/* Teilfehler beim Anlegen (Nachbesserung O4): ein kurzer Satz und die Liste – kein fetter roter Satz über die ganze
+   Breite; der Strich links zeigt, wohin der Fokus springt. */
+.mat-rs-fehler { margin: 10px 0 2px; padding-left: 10px; border-left: 3px solid var(--rot); }
+.mat-rs-fehler > p { margin: 4px 0; }
+.mat-rs-fehler:focus { outline: none; }
+.mat-rs-fehler:focus-visible { outline: 2px solid var(--rot); outline-offset: 2px; }
+.mat-rs-hinweis .lnk { margin-left: 4px; }
+/* O9: Abstand unter der Zeile mit „Verwerfen“ bzw. „Recherche abbrechen“ – am Finger ragt die Tippfläche des
+   Textknopfs (app.css, .lnk) 14 px unter die Zeile und lag sonst auf dem nächsten Absatz. */
+.mat-rs-vorschlag .mat-recherche-zeile { margin-bottom: 10px; }
+@media (pointer: coarse) { .mat-rs-vorschlag .mat-recherche-zeile { margin-bottom: 18px; } }
+/* O9: Häkchen und Beschriftung auf einer Linie, das Vorschaubild mittig daneben (baseline setzte den Kasten höher). */
+.mat-variante-doks.mat-rs-dateien label.inline { align-items: center; }
+/* O1: Mit dem dritten Reiter passt die Leiste auf 344 px (Fold zugeklappt) nur mit kleinerem Innenabstand – nur hier. */
+@media (max-width: 359.98px) {
+  .c-tabs.reiter-linie.mat-reiter:has(> #pd-reiter-recherche) button { padding-left: 8px; padding-right: 8px; } }
+/* O2: Der Reiter „Recherche“ ist lang (Vorschlag mit Karten) – solange er offen ist, klebt die Knopfzeile auch am
+   Rechner unten wie unter (pointer: coarse) in app.css. */
+dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])):has(> .dlg-actions:last-child) {
+  padding-bottom: 0; container-type: scroll-state; }
+dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { position: sticky; bottom: 0; z-index: 2;
+  background: var(--weiss); padding: 10px 0 20px; }
+@container scroll-state(scrollable: bottom) {
+  dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { box-shadow: 0 -10px 10px -10px rgba(0, 0, 0, .25); }
+}
+@media (max-height: 500px) { dialog .dlg-body:has(> #pd-teil-recherche:not([hidden])) > .dlg-actions:last-child { padding-bottom: 14px; } }
+/* O9: Kein Höhensprung zwischen den Reitern – der Dialog hängt oben, wo ein ganz hoher Dialog ohnehin stünde (app.css:
+   80dvh Inhalt + 6 px Rand, mittig = 10dvh − 3 px; am Telefon 8 px, bei wenig Höhe 4 px). Der Reiter „Produkt“ füllt
+   die Höhe fast immer, dann ändert sich nichts; der kürzere Reiter „Recherche“ (läuft) verschiebt die Reiterleiste nicht
+   mehr. :where() hält die Regel so schwach wie „dialog“: offene Tastatur und Fold mit zwei Hälften (app.css) gehen vor. */
+dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: calc(10dvh - 3px); margin-bottom: auto; }
+@media (max-width: 640px) { dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: 8px; } }
+@media (max-height: 500px) { dialog:where([open]:has(#pd-reiter-recherche)) { margin-top: 4px; } }
 /* Änderungsanträge (Entscheidungen vom 21.10.2026; seit dem 24.10.2026 eigene Seite im Bestand): dieselben Karten und
    Marken wie die Produktmeldungen; je Sammelantrag die Liste „Feld: alt → neu“. */
 .mat-meldung.m-bestaetigt { border-left-color: var(--ok); }

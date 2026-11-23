@@ -157,15 +157,43 @@ def fuer_produkt(pid, user=None, meldungen=True):
     """Journal eines Produkts: seine Stammdaten (seit Schritt 38 auch, welches Prüfformular ihm zugewiesen wurde), seine
     Dokumente und die Meldungen, über die es in den Katalog kam – diese nur, soweit das Konto die Meldung sehen darf
     (rechte.darf_meldung: Melder, Material-Verwaltung, wer den Ordner der Meldung sieht). meldungen=False lässt
-    sie ganz weg. Die Versionen früherer spezifischer Formulare stehen seit dem Formular-Pool auf der Formularseite."""
+    sie ganz weg. Die Versionen früherer spezifischer Formulare stehen seit dem Formular-Pool auf der Formularseite.
+    Die Einträge einer Recherche per Claude API zu diesen Meldungen (entity „recherche“) und die eines Laufs ohne
+    Meldung, aus dem das Produkt im Produktdialog entstand (entity „ki_lauf“, G1 A), sieht nur die Material-Verwaltung."""
     paare = [("product", pid)]
     paare += [("document", r["id"]) for r in db.query("SELECT id FROM mat_product_document WHERE product_id = ?", (pid,))]
     if meldungen:
-        from .rechte import darf_meldung
-        paare += [("request", r["id"]) for r in db.query(
-            "SELECT id, created_by, folder_id FROM mat_product_request WHERE product_id = ?", (pid,))
+        from .rechte import darf_meldung, ist_material_verwaltung
+        # Die Meldung, über die das Produkt kam – auch, wenn eine Recherche aus ihr mehrere Produkte anlegte und es
+        # nur im Eintrag „eingepflegt“ steht („produkte“, recherche.uebernehmen).
+        meldungen_ids = [r["id"] for r in db.query(
+            "SELECT id, created_by, folder_id FROM mat_product_request WHERE product_id = ? OR id IN (SELECT entity_id "
+            "FROM mat_audit a WHERE a.entity = 'request' AND a.action = 'eingepflegt' AND a.after_json LIKE "
+            "'%\"produkte\"%' AND EXISTS (SELECT 1 FROM json_each(a.after_json, '$.produkte') WHERE value = ?)) "
+            "ORDER BY id", (pid, pid))
             if darf_meldung(r, user)]
+        paare += [("request", m) for m in meldungen_ids]
+        # Die Recherche per Claude API zur Meldung (entity „recherche“) nur für die Material-Verwaltung (B2 A).
+        if ist_material_verwaltung(user):
+            paare += [("recherche", m) for m in meldungen_ids]
+            # Läufe ohne Meldung, aus denen das Produkt entstand – bestimmt aus dem unveränderlichen Journal („Recherche
+            # übernommen“ nennt das Produkt), nicht aus dem Lauf: dessen Inhalt kann sich ändern. Nur Einträge seit dem
+            # Anlegen des Produkts – eine nach dem Löschen wieder vergebene Kennung meint ein anderes (O1).
+            p = db.query("SELECT created_at FROM mat_product WHERE id = ?", (pid,), one=True)
+            laeufe = [r["entity_id"] for r in db.query(
+                "SELECT DISTINCT entity_id FROM mat_audit a WHERE entity = 'ki_lauf' AND action = 'recherche_uebernommen' "
+                "AND created_at >= ? AND EXISTS (SELECT 1 FROM json_each(a.after_json, '$.produkte') WHERE value = ?) "
+                "ORDER BY entity_id", (p["created_at"] if p else "9999", pid))]
+            if laeufe:
+                # Von diesen Läufen „gestartet“ und „beendet“, an Übernahmen aber nur die, die DIESES Produkt nennen.
+                return [e for e in lesen(paare + [("ki_lauf", lid) for lid in laeufe])
+                        if e["entity"] != "ki_lauf" or e["action"] not in KI_UEBERNAHMEN
+                        or (pid in (e["nachher"] or {}).get("produkte", []) and e["created_at"] >= p["created_at"])]
     return lesen(paare)
+
+
+# Einträge eines Laufs ohne Meldung, die je Produkt gelten (recherche.anhaengen).
+KI_UEBERNAHMEN = ("recherche_uebernommen", "recherche_nachgeladen")
 
 
 # Einträge am Artikel, die das Produkt wechseln (Produkt im Dialog „Bearbeiten“ bis zur ersten Prüfung, per Antrag danach).

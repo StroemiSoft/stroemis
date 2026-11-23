@@ -409,6 +409,11 @@
     // Formular-Pool (Schritt 38): Formular, Heimat, Zuweisungen
     formular: "Prüfformular", formular_id: "Prüfformular Nr.", heimat: "im Pool von", entstanden: "entstanden aus",
     versionen: "Versionen", titel: "Titel", kategorie: "Kategorie", bisher: "bisher", vorlage: "Vorlage Nr.",
+    // Recherche per Claude API an einer Produktmeldung (21.11.2026, entity „recherche“)
+    domains: "Herstellerseiten", bemerkung_mit: "Bemerkung mitgeschickt", ki_modell: "Modell (Claude API)",
+    effort: "Aufwand", ki_lauf: "Recherche Nr.", belegt: "vorbelegte Felder", produkte: "Produkte",
+    // Recherche im Produktdialog (22.11.2026, „Recherche übernommen“ nach „Anlegen“)
+    ausfuehrung: "Ausführung", felder: "übernommene Felder",
   };
   // Die Beschriftung eines Feldes in einem Journaleintrag – wie beschriftung.feld_name: „description“ ist am Produkt der
   // kurze Zusatz hinter dem Namen und heißt dort seit dem Wunsch vom 18.10.2026 „Bemerkung“; an Ordnern und in den
@@ -456,11 +461,16 @@
                    // Schritt 38: Formular-Pool – am Formular, am Produkt und an der Kategorie
                    zugewiesen: "zugewiesen", zuweisung_geloest: "Zuweisung gelöst",
                    formular_zugewiesen: "Prüfformular zugewiesen", formular_zuweisung_geloest: "Zuweisung des Prüfformulars gelöst",
-                   standard_gesetzt: "Standard-Prüfformular gesetzt", standard_geloest: "Standard-Prüfformular gelöst" };
+                   standard_gesetzt: "Standard-Prüfformular gesetzt", standard_geloest: "Standard-Prüfformular gelöst",
+                   // Recherche per Claude API an einer Produktmeldung (21.11.2026)
+                   recherche_gestartet: "Recherche gestartet", recherche_beendet: "Recherche beendet",
+                   recherche_uebernommen: "Recherche übernommen", recherche_nachgeladen: "Recherche nachgeladen" };
   const RECHT = { lesen: "lesen", pruefen: "prüfen", verwalten: "verwalten" };
   const ENTITAET = { item: "Artikel", product: "Produkt", document: "Dokument", form: "Formular", folder: "Ordner",
                      category: "Kategorie", user: "Konto", inspection: "Prüfung", round: "Durchgang", request: "Produktmeldung",
-                     formular: "Prüfformular" };
+                     formular: "Prüfformular", recherche: "Recherche (Claude API)",
+                     // Läufe ohne Meldung (Reiter „Recherche“ im Produktdialog, 22.11.2026) – Kennung des Laufs
+                     ki_lauf: "Recherche (Claude API)" };
 
   /* Warum hier nicht geprüft werden kann – als HTML. obj: der Ordner, Artikel oder die Prüfung (mit „darf“); ohne obj
      gilt die Frage für das ganze Konto (Seite „Prüfungen“). Prüfen braucht seit Phase 2 dreierlei: das Häkchen
@@ -2259,8 +2269,9 @@
           <div class="mat-bildwahl-name" id="${id}-name" aria-live="polite"></div>
           <div class="help" id="${id}-hilfe">${esc(hinweis)}<span class="mat-nur-maus"> Die Datei lässt sich auch hierher ziehen.</span></div>
         </div></div>`;
-  // Liefert die Auswahl als { datei: File | null, entfernen: bool } – gelesen erst beim Speichern.
-  function fotoFeldVerdrahten(dlg, body, id) {
+  // Liefert die Auswahl als { datei: File | null, entfernen: bool } – gelesen erst beim Speichern. beiWahl(): wenn ein
+  // Foto gewählt ist (Reiter „Recherche“: das eigene Bild gewinnt, dessen Häkchen geht aus).
+  function fotoFeldVerdrahten(dlg, body, id, beiWahl) {
     const feld = $(`#${id}-feld`, body);
     const eingabe = $(`#${id}`, body);
     const { wort, bisher } = feld.dataset;
@@ -2294,6 +2305,7 @@
       wahl.datei = f;
       wahl.entfernen = false;
       zeichnen();
+      if (beiWahl) beiWahl();
     }
     // Den Wert gleich leeren: So löst dieselbe Datei nach „Auswahl entfernen“ wieder ein change aus.
     eingabe.addEventListener("change", () => { nehmen(eingabe.files[0]); eingabe.value = ""; });
@@ -4820,43 +4832,148 @@
     if (feld.value.trim()) pruefen();
   }
 
+  /* Die Felder eines Produkts (Kategorie bis Fundstelle der Lebensdauer) – im Produktdialog und, ohne Artikelnummer und
+     Bemerkung, als gemeinsame Felder der Übernahme einer Recherche (uebernahmeDialog, 21.11.2026): dieselben Felder,
+     Grenzen und Hilfen an einer Stelle. opt.ohne: Felder, die fehlen (Schlüssel wie in der Schnittstelle); opt.quelle:
+     je Feld fertiges HTML für einen Hilfetext unter dem Feld (die Fundstelle eines vorbelegten Werts); opt.mehrzeilig:
+     Norm und Fundstelle der Lebensdauer als zweizeiliges Feld (Übernahme: lange vorbelegte Werte stehen ganz da, V8 der
+     Browserprüfung vom 21.11.2026 – Enter bricht nicht um, der Server macht ohnehin eine Zeile daraus).
+     Beschreibung (sichtbar „Bemerkung“): ein Feld wie die anderen – halb breit, der Hilfetext daneben –, eine Zeile,
+     höchstens BESCHREIBUNG_MAX Zeichen (der Server prüft beim Speichern, katalog.beschreibung). Eine ältere, längere
+     wird nie still gekürzt: Das Feld zeigt sie ganz (in einer Zeile – ein Textfeld verschluckte Zeilenumbrüche sonst
+     ohne Leerzeichen), darunter der Hinweis mit dem bisherigen Text; gespeichert wird erst, wenn sie kürzer ist. */
+  const PRODUKT_FELD_ID = { category_id: "pd-kat", manufacturer: "pd-her", model: "pd-mod", description: "pd-desc", article_no: "pd-art",
+                            norm: "pd-norm", material_kind: "pd-mk", interval_months: "pd-int", lifetime_years: "pd-ld", lifetime_source: "pd-lq" };
+  function produktFelderHtml(p, kats, opt) {
+    opt = opt || {};
+    const ohne = new Set(opt.ohne || []);
+    const quelle = opt.quelle || {};
+    const mit = (k) => !ohne.has(k);
+    // Die Fundstelle unter dem Feld, vom Feld aus vorgelesen.
+    const q = (k) => (quelle[k] ? `<div class="help mat-fundstelle" id="${PRODUKT_FELD_ID[k]}-quelle">${quelle[k]}</div>` : "");
+    const zu = (k) => (quelle[k] ? ` aria-describedby="${PRODUKT_FELD_ID[k]}-quelle"` : "");
+    const textfeld = (id, w, attrs) => (opt.mehrzeilig ? `<textarea id="${id}" rows="2" data-einzeilig${attrs}>${esc(w || "")}</textarea>`
+      : `<input type="text" id="${id}" value="${esc(w || "")}"${attrs}>`);
+    const zeile = (zellen, klasse) => (zellen.filter(Boolean).length ? `<div class="field-row${klasse ? ` ${klasse}` : ""}">${zellen.filter(Boolean).join("")}</div>` : "");
+    const beschreibung = String(p.description || "").replace(/\s+/g, " ").trim();
+    const zuLang = beschreibung.length > BESCHREIBUNG_MAX;
+    return `${mit("category_id") ? `<label for="pd-kat">Kategorie</label><select id="pd-kat"${zu("category_id")}><option value="">– bitte wählen –</option>${kategorieOptionen(kats, p.category_id)}</select>${q("category_id")}` : ""}
+      ${zeile([mit("manufacturer") && `<div><label for="pd-her">Hersteller</label><input type="text" id="pd-her" value="${esc(p.manufacturer || "")}" maxlength="120" ${TASTATUR_NAME}${zu("manufacturer")}>${q("manufacturer")}</div>`,
+        mit("model") && `<div><label for="pd-mod">Modell</label><input type="text" id="pd-mod" value="${esc(p.model || "")}" maxlength="160" ${TASTATUR_NAME}${zu("model")}>${q("model")}</div>`])}
+      ${mit("description") ? `<div class="field-row mat-feld-hilfe"><div><label for="pd-desc">Bemerkung</label><input type="text" id="pd-desc" value="${esc(beschreibung)}" maxlength="${BESCHREIBUNG_MAX}" ${TASTATUR_NAME} aria-describedby="pd-desc-hilfe${zuLang ? " pd-desc-alt" : ""}"></div>
+        <div class="help" id="pd-desc-hilfe">Kurzer Zusatz hinter dem Namen, z. B. die Verschlussart.</div></div>
+      ${zuLang ? `<div class="notice mat-beschr-alt" id="pd-desc-alt"><p><strong>Bitte kürzen:</strong> Die bisherige Bemerkung hat ${beschreibung.length} Zeichen, hinter den Namen passen höchstens ${BESCHREIBUNG_MAX}. Gespeichert wird erst, wenn sie kürzer ist – Ausführliches gehört in ein Dokument am Produkt. Bisher:</p>
+        <p class="mat-text">${esc(p.description)}</p></div>` : ""}` : ""}
+      ${zeile([mit("article_no") && `<div><label for="pd-art">Artikelnummer des Herstellers</label><input type="text" id="pd-art" value="${esc(p.article_no || "")}" maxlength="80" ${TASTATUR_NUMMER}><div class="help" id="pd-art-hilfe"></div></div>`,
+        mit("norm") && `<div><label for="pd-norm">Norm</label>${textfeld("pd-norm", p.norm, ` maxlength="200" ${TASTATUR_NUMMER}${zu("norm")}`)}${q("norm")}</div>`])}
+      ${zeile([mit("material_kind") && `<div><label for="pd-mk">Materialart</label><select id="pd-mk"${zu("material_kind")}>${Object.entries(MATERIALART).map(([w, t]) => `<option value="${w}" ${p.material_kind === w ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>${q("material_kind")}</div>`,
+        mit("interval_months") && `<div><label for="pd-int">Prüfintervall (Monate)</label><input type="number" id="pd-int" min="1" max="120" value="${p.interval_months || ""}"${zu("interval_months")}><div class="help" id="pd-int-hilfe"></div>${q("interval_months")}</div>`])}
+      ${zeile([mit("lifetime_years") && `<div><label for="pd-ld">Lebensdauer (Jahre)</label><input type="number" id="pd-ld" min="1" max="50" value="${p.lifetime_years || ""}"${zu("lifetime_years")}><div class="help" id="pd-ld-hilfe"></div>${q("lifetime_years")}</div>`,
+        mit("lifetime_source") && `<div><label for="pd-lq">Fundstelle der Lebensdauer</label>${textfeld("pd-lq", p.lifetime_source, ` maxlength="300" placeholder="z. B. Gebrauchsanleitung, Kap. 9"${zu("lifetime_source")}`)}${q("lifetime_source")}</div>`])}`;
+  }
+  /* Hilfen und Prüfungen der Felder aus produktFelderHtml: Intervall und Lebensdauer je Kategorie und Materialart (Metall
+     ohne Lebensdauer), neu angelegt übernimmt eine gewählte Kategorie Materialart und Norm (opt.vorgaben: gleich beim
+     Öffnen für die vorbelegte Kategorie), Warnung bei vergebener Artikelnummer (opt.ausser: das Produkt selbst). Fehlende
+     Felder (opt.ohne) bleiben außen vor. Liefert daten(): die Werte der vorhandenen Felder wie POST /produkte. */
+  function produktFelderVerdrahten(body, kats, opt) {
+    opt = opt || {};
+    const kat = (id) => kats.find((k) => k.id === +id) || {};
+    const katSel = $("#pd-kat", body), mk = $("#pd-mk", body), ld = $("#pd-ld", body);
+    const hilfen = () => {
+      const k = katSel ? kat(katSel.value) : {};
+      if ($("#pd-int-hilfe", body)) $("#pd-int-hilfe", body).textContent = k.default_interval_months ? `leer = ${k.default_interval_months} Monate aus der Kategorie` : "Pflicht, die Kategorie hat keine Vorgabe";
+      if (!mk || !ld) return;
+      const textil = mk.value === "textil";
+      ld.disabled = mk.value === "metall_hardware";
+      if (ld.disabled) ld.value = "";
+      $("#pd-ld-hilfe", body).textContent = textil ? "Pflicht bei textil – Herstellerangabe" + (k.default_lifetime_years ? ` (Vorschlag der Kategorie: ${k.default_lifetime_years})` : "")
+        : mk.value === "sonstiges" ? "nur mit Herstellerangabe (Fundstelle)" : "Metall hat keine festgeschriebene Lebensdauer";
+    };
+    if (katSel) {
+      katSel.addEventListener("change", () => {
+        const k = kat(katSel.value);
+        if (opt.neu && mk && k.default_material_kind) mk.value = k.default_material_kind;
+        if (opt.neu && $("#pd-norm", body) && !$("#pd-norm", body).value && k.norm) $("#pd-norm", body).value = k.norm;
+        hilfen();
+      });
+    }
+    if (mk) mk.addEventListener("change", hilfen);
+    if (opt.vorgaben && katSel) katSel.dispatchEvent(new Event("change"));
+    hilfen();
+    if ($("#pd-art", body) && $("#pd-her", body)) artikelnummerPruefen($("#pd-art", body), $("#pd-her", body), $("#pd-art-hilfe", body), opt.ausser);
+    const wert = (id) => $(`#${id}`, body);
+    return {
+      daten: () => {
+        const d = {};
+        if (wert("pd-kat")) d.category_id = katSel.value ? +katSel.value : null;
+        if (wert("pd-her")) d.manufacturer = wert("pd-her").value;
+        if (wert("pd-mod")) d.model = wert("pd-mod").value;
+        if (wert("pd-art")) d.article_no = wert("pd-art").value;
+        if (wert("pd-norm")) d.norm = wert("pd-norm").value;
+        if (mk) d.material_kind = mk.value;
+        if (wert("pd-int")) d.interval_months = wert("pd-int").value || null;
+        if (ld) d.lifetime_years = ld.value || null;
+        if (wert("pd-lq")) d.lifetime_source = wert("pd-lq").value;
+        if (wert("pd-desc")) d.description = wert("pd-desc").value;
+        return d;
+      },
+    };
+  }
+
+  /* Fundstellen unter den Feldern aus produktFelderHtml NACH dem Zeichnen (Reiter „Recherche“, „In die Felder
+     übernehmen“) – wie opt.quelle beim Zeichnen: .help.mat-fundstelle unter dem Feld (unter seiner Hilfe, wenn sie
+     daneben steht), vom Feld per aria-describedby vorgelesen. quellen: {Feld: fertiges HTML}; ein Feld ohne Eintrag
+     verliert seine Fundstelle. */
+  function produktFeldQuellen(body, quellen) {
+    Object.entries(PRODUKT_FELD_ID).forEach(([k, id]) => {
+      const el = $(`#${id}`, body);
+      if (!el) return;
+      const qid = `${id}-quelle`;
+      let q = $(`#${qid}`, body);
+      const zu = (el.getAttribute("aria-describedby") || "").split(/\s+/).filter((x) => x && x !== qid);
+      if (!quellen[k]) {
+        if (q) q.remove();
+      } else {
+        if (!q) {
+          q = document.createElement("div");
+          q.className = "help mat-fundstelle";
+          q.id = qid;
+          const hilfe = $(`#${id}-hilfe`, body);
+          (hilfe && hilfe.parentNode === el.parentNode ? hilfe : el).after(q);
+        }
+        q.innerHTML = quellen[k];
+        zu.push(qid);
+      }
+      if (zu.length) el.setAttribute("aria-describedby", zu.join(" "));
+      else el.removeAttribute("aria-describedby");
+    });
+  }
+
   /* opt.danach (Phase 2 · L3, „Im Katalog anlegen“ aus der Nacharbeit): Nach dem Anlegen bleibt die Seite stehen und
      danach(produkt) ordnet das neue Produkt zu – sonst geht es wie bisher zur Produktseite. */
   async function produktDialog(p, opt) {
     opt = opt || {};
-    const kats = await kategorienLaden();
     const neu = !p.id;
-    const kat = (id) => kats.find((k) => k.id === +id) || {};
+    const mitReiter = !opt.danach;
+    /* Der dritte Reiter „Recherche“ (22.11.2026, rechercheReiter): nur für die Material-Verwaltung mit API-Schlüssel
+       (DARF.recherche – in der Übung fehlt das Feld) und nur, wenn ein Produkt neu in den Katalog kommt: „Produkt
+       anlegen“ und „Produkt aus Meldung anlegen“ (A1 A), nicht bei Bearbeiten, Variante und Nacharbeit (A2 A). Der Stand
+       der Recherche kommt gleich mit den Kategorien, damit der Hinweis im Reiter „Produkt“ ohne Sprung dasteht. */
+    const mitRecherche = mitReiter && Boolean(DARF.recherche) && !p.id && !p.variante_von;
+    const [kats, rsStand] = await Promise.all([kategorienLaden(), mitRecherche ? rechercheStandLaden(p) : null]);
     // Als Variante: die aktuellen Dokumente des Vorbilds (neueste Version, nicht zurückgezogen) zur Auswahl.
     const vorbildDoks = p.variante_von ? p.variante_von.dokumente.filter((d) => !d.abgeloest_durch && (!d.withdrawn_on || d.withdrawn_on > isoHeute(0))) : [];
-    /* Beschreibung (sichtbar „Bemerkung“): ein Feld wie die anderen – halb breit, der Hilfetext daneben –, eine Zeile,
-       höchstens BESCHREIBUNG_MAX Zeichen (der Server prüft beim Speichern, katalog.beschreibung). Eine ältere, längere
-       wird nie still gekürzt: Das Feld zeigt sie ganz (in einer Zeile – ein Textfeld verschluckte Zeilenumbrüche sonst
-       ohne Leerzeichen), darunter der Hinweis mit dem bisherigen Text; gespeichert wird erst, wenn sie kürzer ist. */
-    const beschreibung = String(p.description || "").replace(/\s+/g, " ").trim();
-    const zuLang = beschreibung.length > BESCHREIBUNG_MAX;
     /* Zwei Reiter: „Produkt“ (die Felder) und „Bestandteile“ (die Bestandteil-Liste, Schritt 25 – nur Bezeichnung und
        Anzahl, stuecklisteEditor; leer erlaubt). Beim Wechsel geht nichts verloren. Neu angelegt (auch als Variante und
        aus einer Meldung) geht die Liste in derselben Anfrage mit – scheitert eine Position, entsteht nichts und die
        Position ist markiert; beim Bearbeiten erst das Produkt, dann die Liste als Ganzes (PUT …/bestandteile), wenn sie
        sich geändert hat. Nicht in der Nacharbeit (opt.danach). */
-    const mitReiter = !opt.danach;
-    const formular = `${p.variante_von ? `<p class="help">Die Stammdaten sind übernommen – bitte die neue Artikelnummer eintragen und anpassen, was sich unterscheidet.${(p.bestandteile || []).length ? " Die Bestandteile stehen im Reiter „Bestandteile“." : ""}</p>` : ""}
+    const formular = `${mitRecherche ? '<p class="notice mat-rs-hinweis" id="pd-rs-hinweis" hidden></p>' : ""}
+      ${p.variante_von ? `<p class="help">Die Stammdaten sind übernommen – bitte die neue Artikelnummer eintragen und anpassen, was sich unterscheidet.${(p.bestandteile || []).length ? " Die Bestandteile stehen im Reiter „Bestandteile“." : ""}</p>` : ""}
       ${p.meldung ? meldeKasten(p.meldung) : ""}
-      <label for="pd-kat">Kategorie</label><select id="pd-kat"><option value="">– bitte wählen –</option>${kategorieOptionen(kats, p.category_id)}</select>
-      <div class="field-row"><div><label for="pd-her">Hersteller</label><input type="text" id="pd-her" value="${esc(p.manufacturer || "")}" maxlength="120" ${TASTATUR_NAME}></div>
-        <div><label for="pd-mod">Modell</label><input type="text" id="pd-mod" value="${esc(p.model || "")}" maxlength="160" ${TASTATUR_NAME}></div></div>
-      <div class="field-row mat-feld-hilfe"><div><label for="pd-desc">Bemerkung</label><input type="text" id="pd-desc" value="${esc(beschreibung)}" maxlength="${BESCHREIBUNG_MAX}" ${TASTATUR_NAME} aria-describedby="pd-desc-hilfe${zuLang ? " pd-desc-alt" : ""}"></div>
-        <div class="help" id="pd-desc-hilfe">Kurzer Zusatz hinter dem Namen, z. B. die Verschlussart.</div></div>
-      ${zuLang ? `<div class="notice mat-beschr-alt" id="pd-desc-alt"><p><strong>Bitte kürzen:</strong> Die bisherige Bemerkung hat ${beschreibung.length} Zeichen, hinter den Namen passen höchstens ${BESCHREIBUNG_MAX}. Gespeichert wird erst, wenn sie kürzer ist – Ausführliches gehört in ein Dokument am Produkt. Bisher:</p>
-        <p class="mat-text">${esc(p.description)}</p></div>` : ""}
-      <div class="field-row"><div><label for="pd-art">Artikelnummer des Herstellers</label><input type="text" id="pd-art" value="${esc(p.article_no || "")}" maxlength="80" ${TASTATUR_NUMMER}><div class="help" id="pd-art-hilfe"></div></div>
-        <div><label for="pd-norm">Norm</label><input type="text" id="pd-norm" value="${esc(p.norm || "")}" maxlength="200" ${TASTATUR_NUMMER}></div></div>
-      <div class="field-row"><div><label for="pd-mk">Materialart</label><select id="pd-mk">${Object.entries(MATERIALART).map(([w, t]) => `<option value="${w}" ${p.material_kind === w ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
-        <div><label for="pd-int">Prüfintervall (Monate)</label><input type="number" id="pd-int" min="1" max="120" value="${p.interval_months || ""}"><div class="help" id="pd-int-hilfe"></div></div></div>
-      <div class="field-row"><div><label for="pd-ld">Lebensdauer (Jahre)</label><input type="number" id="pd-ld" min="1" max="50" value="${p.lifetime_years || ""}"><div class="help" id="pd-ld-hilfe"></div></div>
-        <div><label for="pd-lq">Fundstelle der Lebensdauer</label><input type="text" id="pd-lq" value="${esc(p.lifetime_source || "")}" maxlength="300" placeholder="z. B. Gebrauchsanleitung, Kap. 9"></div></div>
+      ${produktFelderHtml(p, kats)}
       ${fotoFeld("pd-bild", "Produktbild", "Bild", p.bild ? p.vorschau || p.bild : "", "JPEG, PNG, WebP oder HEIC vom Telefon.")}
+      ${mitRecherche ? '<div id="pd-rs-dateien"></div>' : ""}
       ${p.variante_von ? `<fieldset class="mat-variante-doks"><legend>Dokumente übernehmen</legend>
         ${vorbildDoks.length ? vorbildDoks.map((d) => `<label class="inline"><input type="checkbox" class="pd-dok" value="${d.id}" checked> ${esc(d.title)}
           <span class="muted small">${esc(DOKART[d.kind] || d.kind)}${d.version ? `, ${esc(d.version)}` : ""}${d.datei ? "" : " · Link"}</span></label>`).join("") : '<p class="help">Das Produkt hat keine aktuellen Dokumente.</p>'}
@@ -4868,51 +4985,38 @@
     dialog(mitReiter ? `<h2 id="pd-titel">${titel}</h2>
       <div class="c-tabs reiter-linie mat-reiter" role="tablist" aria-labelledby="pd-titel">
         <button type="button" role="tab" id="pd-reiter-produkt" aria-controls="pd-teil-produkt" data-reiter="produkt">Produkt</button>
-        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button></div>
+        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button>${mitRecherche ? `
+        <button type="button" role="tab" id="pd-reiter-recherche" aria-controls="pd-teil-recherche" data-reiter="recherche">Recherche</button>` : ""}</div>
       <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-produkt" aria-labelledby="pd-reiter-produkt">${formular}</div>
-      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>
+      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>${mitRecherche ? `
+      <div class="mat-reiter-teil mat-rs-vorschlag" role="tabpanel" id="pd-teil-recherche" aria-labelledby="pd-reiter-recherche" hidden></div>` : ""}
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="pd-ok" type="button">${neu ? "Anlegen" : "Speichern"}</button></div>`
       : `<h2>${titel}</h2>${formular}
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="pd-ok" type="button">${neu ? "Anlegen" : "Speichern"}</button></div>`,
     (dlg, body) => {
-      const katSel = $("#pd-kat", body), mk = $("#pd-mk", body), ld = $("#pd-ld", body);
-      const hilfen = () => {
-        const k = kat(katSel.value);
-        $("#pd-int-hilfe", body).textContent = k.default_interval_months ? `leer = ${k.default_interval_months} Monate aus der Kategorie` : "Pflicht, die Kategorie hat keine Vorgabe";
-        const textil = mk.value === "textil";
-        ld.disabled = mk.value === "metall_hardware";
-        if (ld.disabled) ld.value = "";
-        $("#pd-ld-hilfe", body).textContent = textil ? "Pflicht bei textil – Herstellerangabe" + (k.default_lifetime_years ? ` (Vorschlag der Kategorie: ${k.default_lifetime_years})` : "")
-          : mk.value === "sonstiges" ? "nur mit Herstellerangabe (Fundstelle)" : "Metall hat keine festgeschriebene Lebensdauer";
-      };
-      katSel.addEventListener("change", () => {
-        const k = kat(katSel.value);
-        if (neu && k.default_material_kind) mk.value = k.default_material_kind;
-        if (neu && !$("#pd-norm", body).value && k.norm) $("#pd-norm", body).value = k.norm;
-        hilfen();
-      });
-      mk.addEventListener("change", hilfen);
-      if (p.id && !p.variante_von) verschiebenFolgen(katSel, $("#pd-folgen", body), (wert) => `produkt=${p.id}&kategorie=${wert}`, p.category_id);
       // Neu in einer Kategorie: deren Vorgaben übernehmen – nicht bei einer Variante, die hat ihre eigenen.
-      if (neu && p.category_id && !p.variante_von) katSel.dispatchEvent(new Event("change"));
-      hilfen();
-      artikelnummerPruefen($("#pd-art", body), $("#pd-her", body), $("#pd-art-hilfe", body), p.id);
-      const bildWahl = fotoFeldVerdrahten(dlg, body, "pd-bild");
+      const felder = produktFelderVerdrahten(body, kats, { neu, ausser: p.id, vorgaben: neu && p.category_id && !p.variante_von });
+      if (p.id && !p.variante_von) verschiebenFolgen($("#pd-kat", body), $("#pd-folgen", body), (wert) => `produkt=${p.id}&kategorie=${wert}`, p.category_id);
+      let rs = null;                 // der Reiter „Recherche“ (rechercheReiter)
+      const bildWahl = fotoFeldVerdrahten(dlg, body, "pd-bild", () => { bildHoch = false; if (rs) rs.eigenesBild(); });
       // Die Bestandteil-Liste und die Reiter (Start „Produkt“, „Bestandteile bearbeiten“ öffnet „Bestandteile“); die
-      // Variante übernimmt die Liste des Vorbilds zum Bearbeiten.
+      // Variante übernimmt die Liste des Vorbilds zum Bearbeiten. Der Reiter „Recherche“ liest bei jedem Wechsel dorthin
+      // die Felder des Reiters „Produkt“.
       const stueck = mitReiter ? stuecklisteEditor($("#pd-teil-bestandteile", body), p) : null;
-      const reiterZeigen = mitReiter ? reiterSchalten(body, opt.reiter === "bestandteile" ? "bestandteile" : "produkt") : null;
+      const reiterZeigen = mitReiter ? reiterSchalten(body, opt.reiter === "bestandteile" ? "bestandteile" : "produkt",
+        (name) => { if (rs && name === "recherche") rs.zeigen(); }) : null;
+      if (mitRecherche) rs = rechercheReiter({ dlg, body, p, kats, felder, reiterZeigen, bildWahl, stand: rsStand });
       // Erst die Angaben (ein neues Produkt samt Bestandteil-Liste), dann das Bild. Scheitert nur das Bild, kennt der
       // Dialog das Produkt schon: Ein zweiter Klick speichert die Angaben erneut und lädt das Bild nach, statt das Produkt
       // doppelt anzulegen. Beim Bearbeiten geht die Liste nach dem Produkt an den Server; scheitert sie, bleibt der Dialog
-      // im Reiter „Bestandteile“.
+      // im Reiter „Bestandteile“. Mit „In die Felder übernehmen“ (Reiter „Recherche“) hängen danach die gewählten Dateien
+      // aus der Recherche an (3.4: erst Angaben, dann Dateien, dann ein eigenes Bild); fehlt eine, bleibt der Dialog offen
+      // und ein zweiter Klick hängt nur an, was fehlt.
       let pid = p.id || null;
+      let bildHoch = false;          // das eigene Bild ist schon oben (zweiter Klick nach einem Teilfehler)
       $("#pd-ok", body).onclick = async (ev) => {
         const knopf = ev.currentTarget;
-        const daten = { category_id: katSel.value ? +katSel.value : null, manufacturer: $("#pd-her", body).value, model: $("#pd-mod", body).value,
-                        article_no: $("#pd-art", body).value, norm: $("#pd-norm", body).value, material_kind: mk.value,
-                        interval_months: $("#pd-int", body).value || null, lifetime_years: ld.value || null,
-                        lifetime_source: $("#pd-lq", body).value, description: $("#pd-desc", body).value };
+        const daten = felder.daten();
         const bild = bildWahl.datei;
         if (p.variante_von && !pid && !daten.article_no.trim()) { toast("Eine Variante braucht eine eigene Artikelnummer.", true); fokus($("#pd-art", body)); return; }
         const laenge = daten.description.replace(/\s+/g, " ").trim().length;
@@ -4944,12 +5048,21 @@
             catch (e) { stueck.fehlerZeigen(e.message); reiterZeigen("bestandteile"); throw e; }
           }
           if (mitReiter) stueck.gespeichert();
-          if (bild) {
+          const anhang = rs ? await rs.anhaengen(pid, Boolean(bild)) : null;
+          if (bild && !bildHoch) {
             const fd = new FormData();
             fd.append("file", bild);
             await api(`${API}/produkte/${pid}/bild`, { method: "POST", body: fd });
+            bildHoch = true;
           } else if (bildWahl.entfernen) {
             await api(`${API}/produkte/${pid}/bild`, { method: "DELETE" });
+          }
+          // Teilfehler (O4): Das Produkt steht, der Dialog bleibt offen – die Hauptaktion hängt nur noch an, was fehlt.
+          // Abgelehnt (AB5): Satz im Reiter „Produkt“, der nächste Klick speichert nur noch die Angaben.
+          if (anhang && (anhang.fehler.length || anhang.abgelehnt)) {
+            knopf.textContent = anhang.fehler.length ? "Fehlendes anhängen" : "Speichern";
+            knopf.disabled = false;
+            return;
           }
           dlg.close();
           if (opt.danach) await opt.danach(r.produkt);
@@ -4960,8 +5073,9 @@
   }
 
   /* Reiter in einem Dialog (role tablist/tab/tabpanel wie „Ordner bearbeiten“; ← und → wechseln, Pos1 und Ende
-     springen). Die Teile tragen aria-labelledby auf ihren Reiter. Liefert zeigen(name, fokusReiter). */
-  function reiterSchalten(body, start) {
+     springen). Die Teile tragen aria-labelledby auf ihren Reiter. Liefert zeigen(name, fokusReiter). beimZeigen(name):
+     nach jedem Wechsel (Reiter „Recherche“ liest dann die Felder des Reiters „Produkt“). */
+  function reiterSchalten(body, start, beimZeigen) {
     const reiter = $$('[role="tab"]', body);
     let aktiv = null;
     function zeigen(name, fokusReiter) {
@@ -4975,6 +5089,7 @@
         const teil = $(`#${t.getAttribute("aria-controls")}`, body);
         if (teil) teil.hidden = !an;
       });
+      if (beimZeigen) beimZeigen(name);
     }
     reiter.forEach((t) => t.addEventListener("click", () => zeigen(t.dataset.reiter)));
     $('[role="tablist"]', body).addEventListener("keydown", (e) => {
@@ -8087,20 +8202,27 @@
   const meldeKasten = (m) => `<div class="mat-meldekasten"><p class="small">Gemeldet von ${person(m.created_by_name || "–")} am ${esc(fmtTag(m.created_at))}${meldeOrdner(m) ? ` für ${esc(meldeOrdner(m))}` : ""}</p>${meldeDetails(m, "Bemerkung des Melders")}</div>`;
 
   // bearbeiten: die Material-Verwaltung in der Liste aller Meldungen – nur sie bekommt die Knöpfe zum Abarbeiten.
-  function meldeKarte(m, bearbeiten) {
+  // moeglich: recherche_moeglich der Liste – nur mit API-Schlüssel für die Material-Verwaltung, sonst fehlt der Knopf
+  // „Recherchieren lassen“ ganz (Übung, andere Rollen); geht gerade kein Start, steht der Grund über der Knopfzeile.
+  function meldeKarte(m, bearbeiten, moeglich) {
     const wer = (name) => (name ? ` von ${person(name)}` : "");
     const knoepfe = [];
     if (bearbeiten && m.status === "offen") {
       knoepfe.push(`<button type="button" class="btn secondary small" data-act="anlegen" data-id="${m.id}">Produkt anlegen</button>`,
                    `<button type="button" class="btn secondary small" data-act="zuordnen" data-id="${m.id}">Vorhandenes zuordnen</button>`,
                    `<button type="button" class="btn secondary small" data-act="ablehnen" data-id="${m.id}">Ablehnen</button>`);
+      // Ausgegraut verweist der Knopf auf den einen Satz über der Liste (#mr-grund, V6) – nicht je Karte derselbe Satz.
+      if (moeglich && !rechercheLaeuft(m.recherche)) {
+        const grund = moeglich.an ? "" : moeglich.grund;
+        knoepfe.push(`<button type="button" class="btn secondary small" data-act="recherche" data-id="${m.id}"${grund ? knopfAus("mr-grund", grund) : ""}>${m.recherche ? "Erneut recherchieren" : "Recherchieren lassen"}</button>`);
+      }
     }
     if (m.eigen && DARF.verwalten && m.status === "eingepflegt" && m.produkt) {
       knoepfe.push(`<a class="btn secondary small" href="/materialablage/artikel/neu?produkt=${m.produkt.id}${m.ordner && m.ordner.id ? `&ordner=${m.ordner.id}` : ""}">Artikel davon anlegen</a>`);
     }
     // Eigene Meldungen löscht der Melder selbst – offen oder erledigt.
     if (m.eigen) knoepfe.push(`<button type="button" class="btn secondary small" data-act="loeschen" data-id="${m.id}">Löschen</button>`);
-    return `<article class="mat-meldung m-${esc(m.status)}">
+    return `<article class="mat-meldung m-${esc(m.status)}" id="meldung-${m.id}">
       <div class="mat-meldung-kopf"><h2>${esc(meldungName(m))}</h2>${meldestatusMarke(m.status)}</div>
       <p class="muted small">gemeldet${wer(m.created_by_name)} am ${esc(fmtTag(m.created_at))}${meldeOrdner(m) ? ` · für ${esc(meldeOrdner(m))}` : ""}</p>
       ${meldeDetails(m)}
@@ -8111,6 +8233,7 @@
         ${m.answer ? `<br><span class="mat-text">${esc(m.answer)}</span>` : ""}</p>` : ""}
       ${m.status === "abgelehnt" ? `<p class="mat-meldung-ergebnis">Abgelehnt${wer(m.resolved_by_name)} am ${esc(fmtTag(m.resolved_at))}: <span class="mat-text">${esc(m.answer)}</span></p>` : ""}
       ${knoepfe.length ? `<div class="btn-row">${knoepfe.join("")}</div>` : ""}
+      ${bearbeiten ? rechercheZeile(m, moeglich) : ""}
     </article>`;
   }
 
@@ -8119,6 +8242,7 @@
     let eigene = null;            // null: was der Server für die Rolle vorsieht; Materialwarte schalten zwischen „1“ und „0“
     // Nur noch Produktmeldungen (Wunsch vom 24.10.2026): Die Änderungsanträge haben ihre Seite im Bestand.
     leisteMarkieren(null);
+    let gezeigt = [];             // die Meldungen der Liste – fürs Nachfragen nach einer laufenden Recherche
     async function zeichnen() {
       const q = new URLSearchParams();
       if (filter) q.set("status", filter);
@@ -8126,12 +8250,13 @@
       const d = await api(`${API}/meldungen${String(q) ? `?${q}` : ""}`);
       filter = d.filter;
       const liste = d.meldungen;
+      gezeigt = liste;
       const meldung = (b) => liste.find((m) => m.id === +b.dataset.id);
       // Lesende (Führungskraft, Materialwart in „alle“) sehen dieselben Karten ohne Knöpfe zum Abarbeiten.
       // „Artikel anlegen“ nur in der eigenen Liste des Materialwarts: Steht ein gemeldetes Produkt im Katalog, legt er dort
       // den Artikel an (der Ordner wird im Formular gewählt). Für die Material-Verwaltung, die Meldungen abarbeitet, und
       // in „alle“ gehörte der Knopf nicht zur Seite (UI/UX vor dem Merge, B13).
-      const hilfe = d.bearbeiten ? "Materialwarte melden hier Produkte, die ihnen beim Anlegen von Artikeln im Katalog fehlen. „Produkt anlegen“ übernimmt ihre Angaben in den Produktdialog. Der Melder bekommt eine Mail, sobald das Produkt im Katalog ist – oder deine Begründung, wenn du ablehnst."
+      const hilfe = d.bearbeiten ? `Materialwarte melden hier Produkte, die ihnen beim Anlegen von Artikeln im Katalog fehlen. „Produkt anlegen“ übernimmt ihre Angaben in den Produktdialog. Der Melder bekommt eine Mail, sobald das Produkt im Katalog ist – oder deine Begründung, wenn du ablehnst.${d.recherche_moeglich ? " Mit „Recherchieren lassen“ sucht Claude Angaben und Dateien beim Hersteller – du entscheidest, was übernommen wird." : ""}`
         : d.alle ? "Materialwarte melden hier Produkte, die ihnen beim Anlegen von Artikeln im Katalog fehlen; die Material-Verwaltung nimmt sie auf oder lehnt sie mit Begründung ab."
           : "Produkte, die du beim Anlegen von Artikeln als fehlend gemeldet hast. Du bekommst eine Mail, sobald die Material-Verwaltung sie bearbeitet hat.";
       seitenTitel(d.alle ? "Produktmeldungen" : "Deine Produktmeldungen");
@@ -8139,7 +8264,8 @@
           <div class="btn-row"><a class="btn secondary" href="/materialablage/katalog">Katalog</a>${DARF.verwalten && !d.alle && !d.bearbeiten ? '<a class="btn secondary" href="/materialablage/artikel/neu"><span class="k-text"><span class="k-plus" aria-hidden="true">+ </span>Artikel<span class="k-anlegen"> anlegen</span></span></a>' : ""}</div></div>
         <p class="help">${hilfe}${DARF.verwalten && !DARF.katalog ? ` <button type="button" class="lnk" data-act="eigene">${d.alle ? "Nur deine zeigen" : "Alle Meldungen zeigen"}</button>` : ""}</p>
         <div class="c-tabs mat-filter" role="group" aria-label="Status">${[["offen", "offen"], ["erledigt", "erledigt"], ["alle", "alle"]].map(([w, t]) => `<button type="button" class="${w === filter ? "sel" : ""}" data-act="filter" data-f="${w}" aria-pressed="${w === filter}">${t}${w === "offen" && d.offen ? ` (${d.offen})` : ""}</button>`).join("")}</div>
-        ${liste.length ? liste.map((m) => meldeKarte(m, d.bearbeiten)).join("") : leer(filter === "offen" ? "Keine offenen Meldungen." : "Keine Meldungen.")}`;
+        ${rechercheSperre(d, liste)}
+        ${liste.length ? liste.map((m) => meldeKarte(m, d.bearbeiten, d.recherche_moeglich)).join("") : leer(filter === "offen" ? "Keine offenen Meldungen." : "Keine Meldungen.")}`;
       aktionen = {
         filter: (b) => {
           filter = b.dataset.f;
@@ -8170,7 +8296,55 @@
           try { await api(`${API}/meldungen/${m.id}`, { method: "DELETE" }); toast("Meldung gelöscht"); await zeichnen(); }
           catch (e) { toast(e.message, true); }
         },
+        recherche: (b) => rechercheStartDialog(meldung(b), neuZeichnen),
+        vorschlag: (b) => vorschlagDialog(meldung(b), neuZeichnen),
+        "recherche-abbrechen": async (b) => {
+          const m = meldung(b);
+          if (!(await confirm(`Recherche zu „${meldungName(m)}“ abbrechen? Ein Vorschlag entsteht dann nicht; sie zählt trotzdem zum Kontingent.`,
+            "Recherche abbrechen", "Weiterlaufen lassen", { endgueltig: false }))) return;
+          try { await api(rechercheUrl(m, "/abbrechen"), { method: "POST", body: {} }); toast("Recherche wird abgebrochen"); }
+          catch (e) { toast(e.message, true); }
+          await neuZeichnen();
+        },
       };
+      beobachten();
+    }
+    /* Läuft eine Recherche (höchstens eine app-weit), fragt die Seite alle 5 s nach – nur dann und nur, solange sie
+       sichtbar ist. Der Stand steht in der Statuszeile (role="status"); ist der Lauf zu Ende, meldet ein Toast es und die
+       Liste zeichnet sich neu (Knöpfe, Kontingent, Vorschlag), der Fokus bleibt auf seinem Knopf. */
+    let nachfrage = null;
+    function beobachten() {
+      clearTimeout(nachfrage);
+      nachfrage = null;
+      const m = gezeigt.find((x) => rechercheLaeuft(x.recherche));
+      if (!m || document.visibilityState !== "visible") return;
+      nachfrage = setTimeout(async () => {
+        nachfrage = null;
+        const stand = $(`#meldung-${m.id} .mat-recherche-stand`, inhalt);
+        if (!stand) return;                                   // inzwischen neu gezeichnet oder eine andere Ansicht
+        let r;
+        try { r = (await api(rechercheUrl(m))).recherche; }
+        catch (e) { if (e.status) await neuZeichnen(); else beobachten(); return; }   // ohne Netz: später noch einmal
+        if (rechercheLaeuft(r)) {
+          m.recherche = r;
+          if (stand.textContent !== rechercheStand(r)) stand.textContent = rechercheStand(r);
+          beobachten();
+          return;
+        }
+        if (r) toast(r.status === "fertig" ? `Recherche zu „${meldungName(m)}“ fertig – der Vorschlag steht an der Meldung.`
+          : r.status === "abgebrochen" ? `Recherche zu „${meldungName(m)}“ abgebrochen.` : `Recherche zu „${meldungName(m)}“ gescheitert.`, r.status === "fehlgeschlagen");
+        await neuZeichnen();
+      }, 5000);
+    }
+    document.addEventListener("visibilitychange", beobachten);
+    // Neu zeichnen, ohne dass der Fokus verloren geht: zurück auf den Knopf gleicher Aktion an derselben Meldung.
+    async function neuZeichnen() {
+      const ae = document.activeElement;
+      const ziel = ae && inhalt.contains(ae) && ae.dataset && ae.dataset.act
+        ? `[data-act="${ae.dataset.act}"]${ae.dataset.id ? `[data-id="${ae.dataset.id}"]` : ""}` : null;
+      await zeigen(zeichnen);
+      const el = ziel && $(ziel, inhalt);
+      if (el) el.focus({ preventScroll: true });
     }
     await zeichnen();
   }
@@ -8334,6 +8508,808 @@
         } catch (e) { S.fehlschlag(knopf, e, body); }
       };
     });
+  }
+
+  /* --- Recherche per Claude API an einer Meldung (21.11.2026; routes_recherche.py, services/recherche.py) -------------
+     Nur für die Material-Verwaltung und nur mit API-Schlüssel: Dann trägt GET /meldungen „recherche_moeglich“ und jede
+     Meldung „recherche“ (den jüngsten Lauf) – sonst fehlen beide und mit ihnen Knopf und Statuszeile (auch in der Übung).
+     An der offenen Meldung steht der graue Knopf „Recherchieren lassen“ (nach einem Lauf „Erneut recherchieren“) neben
+     den drei anderen, unter der Knopfzeile die Statuszeile des Laufs. Was die Recherche findet, ist nur ein Vorschlag:
+     In den Katalog kommt es erst über „Vorschlag ansehen“ → „Produkte anlegen“ → „Anlegen“, jedes Feld änderbar. */
+  const RECHERCHE_LAEUFT = ["wartet", "laeuft"];
+  const rechercheLaeuft = (r) => Boolean(r && RECHERCHE_LAEUFT.includes(r.status));
+  const rechercheUrl = (m, rest) => `${API}/meldungen/${m.id}/recherche${rest || ""}`;
+  const rechercheDatei = (m, n) => rechercheUrl(m, `/dateien/${n}`);
+  // „Recherche läuft – Dateien werden geprüft (2 von 5)“; in der ersten Phase (und solange er wartet) nur der Anfang.
+  const rechercheStand = (r) => `Recherche läuft${r.phase_text && r.phase !== "recherche" ? ` – ${r.phase_text}` : ""}${r.fortschritt ? ` (${r.fortschritt})` : ""}`;
+  // Nach einem Ausweichen auf ein anderes Modell sind die Kosten nur geschätzt (mit den Preisen des eigentlichen Modells).
+  // Ohne Kosten (abgebrochen, bevor etwas gefragt war) steht nichts da – nicht „ca. 0,00 $“.
+  const rechercheKosten = (r) => (r.kosten && r.kosten_cent ? ` · ${esc(r.kosten)}${r.ausweichmodell ? " (geschätzt)" : ""}` : "");
+  // Zeit und Name als Einheit: Am Telefon brach „07:39 (⏎Name)“ sonst mitten darin um.
+  const rechercheVom = (r) => `Recherche vom <span class="name-einheit">${esc(fmtZeit(r.gestartet_am))}${r.von ? ` (${person(r.von)})` : ""}</span>`;
+  // Ein Link nur auf http(s) – Adressen aus einer Recherche stammen aus dem Netz.
+  const fremdLink = (url, text) => (/^https?:\/\//i.test(url || "") ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${text || esc(kurzLink(url))}</a>` : text || "");
+  const produktLinks = (liste) => liste.map((p) => `<a href="/materialablage/katalog/produkt/${p.id}">${nameHtml(p)}</a>${zusatzHtml(p)}${artNrKurz(p.article_no)}`).join(", ");
+
+  /* Warum „Recherchieren lassen“ ausgegraut ist (Kontingent aufgebraucht, es läuft schon eine): EIN Satz über der Liste
+     (V6 der Browserprüfung vom 21.11.2026 – vorher derselbe Satz an jeder offenen Karte); die Knöpfe verweisen mit
+     aria-describedby darauf, ein Klick hebt ihn hervor (Klick-Abfang bei knopfGrund). Nur, wenn ein solcher Knopf da ist. */
+  function rechercheSperre(d, liste) {
+    const k = d.recherche_moeglich;
+    if (!d.bearbeiten || !k || k.an || !liste.some((m) => m.status === "offen" && !rechercheLaeuft(m.recherche))) return "";
+    return `<p class="notice mat-recherche-sperre" id="mr-grund" aria-live="polite">${esc(k.grund)}</p>`;
+  }
+
+  // Die Statuszeile unter der Knopfzeile – eine Zeile, kein zweiter Kasten. Ohne API-Schlüssel (moeglich fehlt) bleibt
+  // sie lesbar, nur „Abbrechen“ fehlt (V2 der Browserprüfung).
+  function rechercheZeile(m, moeglich) {
+    const r = m.recherche;
+    if (!r) return "";
+    if (rechercheLaeuft(r)) {
+      return `<p class="mat-recherche-zeile"><span class="mat-recherche-stand" role="status">${esc(rechercheStand(r))}</span>
+        ${moeglich ? `<button type="button" class="lnk" data-act="recherche-abbrechen" data-id="${m.id}">Abbrechen</button>` : ""}</p>`;
+    }
+    const ansehen = `<button type="button" class="btn secondary small" data-act="vorschlag" data-id="${m.id}">Vorschlag ansehen</button>`;
+    if (r.status === "fertig") return `<div class="mat-recherche-zeile"><span>${rechercheVom(r)}${rechercheKosten(r)}</span>${ansehen}</div>`;
+    if (r.status === "uebernommen") {
+      return `<div class="mat-recherche-zeile"><span>Aus der ${rechercheVom(r)} angelegt: ${(r.produkte || []).length ? produktLinks(r.produkte) : '<span class="muted">Produkte inzwischen gelöscht</span>'}</span>${ansehen}</div>`;
+    }
+    const grund = r.status === "abgebrochen" && (!r.fehler || r.fehler === "Abgebrochen.") ? "." : `: <span class="mat-text">${esc(r.fehler || "ohne Angabe")}</span>`;
+    return `<p class="mat-recherche-zeile"><span>${rechercheVom(r)}${rechercheKosten(r)} – ${r.status === "abgebrochen" ? "abgebrochen" : "gescheitert"}${grund}</span></p>`;
+  }
+
+  /* Startdialog: die Herstellerseite(n) bestätigen (vorbelegt), Fotos und Bemerkung nur mit Häkchen (Vorgabe aus; die
+     Bemerkung steht zur Kontrolle darüber), was an die Claude API geht, und das Kontingent. Fehler am Feld (400) bzw. als
+     Satz über der Knopfzeile (409, 429, 503 – der Knopf ist dann ausgegraut). Ein neuer Lauf ersetzt den Vorschlag. */
+  // Was an die Claude API geht – als kurze Liste statt eines Absatzes (V7 der Browserprüfung).
+  const datenschutzHtml = (d) => (d && d.gesendet ? `<div class="help mat-recherche-datenschutz"><p>${esc(d.titel)}</p>
+      <ul>${d.gesendet.map((x) => `<li>${esc(x)}</li>`).join("")}</ul><p>${esc(d.nie)}</p></div>` : "");
+  async function rechercheStartDialog(m, danach) {
+    let d;
+    try { d = await api(rechercheUrl(m)); } catch (e) { toast(e.message, true); return; }
+    if (!d.start) { toast("Diese Meldung ist schon erledigt.", true); await danach(); return; }
+    const s = d.start, k = d.moeglich, r = d.recherche;
+    const grund = k.an ? "" : k.grund;
+    dialog(`<h2>Recherche für „${esc(meldungName(m))}“</h2>
+      ${r && r.status === "fertig" ? `<p>Die neue Recherche ersetzt den Vorschlag vom ${esc(fmtZeit(r.gestartet_am))}.</p>` : ""}
+      <label for="rs-domains">Herstellerseite</label>
+      <input type="text" id="rs-domains" value="${esc(s.domains.join(", "))}" ${TASTATUR_ADRESSE} aria-describedby="rs-domains-hilfe${(s.domains_aus_links || []).length ? " rs-domains-herkunft" : ""}">
+      <div class="help" id="rs-domains-hilfe">Eine bis drei Domains, durch Komma getrennt, z. B. hersteller.de. Nur dort (und auf den Seiten der Links der Meldung) ruft Claude Seiten ab und lädt der Server Dateien.</div>
+      ${(s.domains_aus_links || []).length ? `<p class="help mat-recherche-herkunft" id="rs-domains-herkunft">Aus einem Link der Meldung: ${s.domains_aus_links.map((x) => `<span class="mat-ganz">${esc(x)}</span>`).join(", ")} – bitte prüfen, ob die Seite wirklich dem Hersteller gehört.</p>` : ""}
+      ${s.fotos ? `<label class="inline"><input type="checkbox" id="rs-fotos"> ${esc(plural(s.fotos, "Foto", "Fotos"))} mitschicken</label>` : ""}
+      ${s.bemerkung ? `<div class="mat-feldkopf">Bemerkung des Melders</div><p class="mat-text mat-recherche-bemerkung">${esc(s.bemerkung)}</p>
+        <label class="inline"><input type="checkbox" id="rs-bemerkung"> Bemerkung mitschicken</label>` : ""}
+      ${datenschutzHtml(s.datenschutz)}
+      <p class="help">Kontingent: noch ${k.rest} von ${k.grenze} in diesem Monat.</p>
+      ${grundSatz("rs-grund", grund)}
+      <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="rs-ok" type="button"${knopfAus("rs-grund", grund)}>Recherchieren</button></div>`,
+    (dlg, body) => {
+      const feld = $("#rs-domains", body);
+      fokus(feld);
+      const haken = (id) => Boolean($(id, body) && $(id, body).checked);
+      $("#rs-ok", body).onclick = async (ev) => {
+        const knopf = ev.currentTarget;
+        const domains = feld.value.split(/[\s,;]+/).filter(Boolean);
+        if (!domains.length || domains.length > 3) { S.feldFehler(feld, "Bitte eine bis drei Domains angeben, z. B. hersteller.de."); return; }
+        knopf.disabled = true;
+        try {
+          await api(rechercheUrl(m), { method: "POST", body: { domains, fotos: haken("#rs-fotos"), bemerkung: haken("#rs-bemerkung") } });
+          dlg.close(); toast("Recherche gestartet"); await danach();
+        } catch (e) {
+          knopf.disabled = false;
+          if (e.status === 400) S.feldFehler(feld, e.message);
+          else if ([409, 429, 503].includes(e.status)) { knopfGrund(knopf, e.message); knopf.focus(); }
+          else S.fehlschlag(knopf, e, body);
+        }
+      };
+      feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#rs-ok", body).click(); } });
+    });
+  }
+
+  /* --- Vorschlag ansehen ---------------------------------------------------------------------------------------------
+     Gemeinsame Felder als Tabelle Feld | Vorschlag | Fundstelle, darunter je Ausführung Artikelnummer, Bemerkung, die
+     abweichenden Felder und das Bild, dann die Dateien mit dem Ergebnis der Dokumentprüfung, Hinweise und Rückfragen.
+     Am Telefon werden die Tabellen zu Karten (table.list). Hauptaktion „Produkte anlegen“ (bei einer anlegbaren
+     Ausführung „Produkt anlegen“) nur an einer offenen Meldung mit fertigem Vorschlag. */
+  const BELEG = { hersteller: "belegt", webarchiv: "Webarchiv", nur_identifikation: "nur Identifikation", nicht_belegt: "nicht belegt" };
+  const VORSCHLAG_FELD = { manufacturer: "Hersteller", model: "Modell", category_id: "Kategorie", material_kind: "Materialart", norm: "Norm",
+                           interval_months: "Prüfintervall", lifetime_years: "Lebensdauer", lifetime_source: "Fundstelle der Lebensdauer",
+                           article_no: "Artikelnummer", description: "Bemerkung" };
+  const GEMEINSAME_FELDER = ["manufacturer", "model", "category_id", "material_kind", "norm", "interval_months", "lifetime_years", "lifetime_source"];
+  // Felder, die je Ausführung verschieden sein können – verschieden sind sie, wo der Vorschlag sie nicht gemeinsam führt.
+  const AUSFUEHRUNG_FELDER = ["material_kind", "norm", "interval_months", "lifetime_years", "lifetime_source"];
+  const jeAusfuehrung = (v) => AUSFUEHRUNG_FELDER.filter((k) => !v.gemeinsam[k]
+    || v.ausfuehrungen.some((a) => a.felder[k] && a.felder[k].wert !== v.gemeinsam[k].wert));
+  const vergleichbar = (nr) => String(nr || "").toLowerCase().replace(/[\W_]+/g, "");     // wie katalog._einheitlich
+  const katPfad = (kats, id) => {
+    const teile = [];
+    for (let k = kats.find((x) => x.id === +id); k && teile.length < 20; k = k.parent_id ? kats.find((x) => x.id === k.parent_id) : null) teile.unshift(k.name);
+    return teile.join(" / ");
+  };
+  function vorschlagWert(k, f, kats) {
+    // Leer: eine leere Zelle – die Tabelle zeigt dort „–“ (CSS), die Karte am Telefon blendet sie aus (V3).
+    const w = f ? f.wert : null;
+    if (w === null || w === undefined || w === "") return "";
+    const text = k === "category_id" ? esc(katPfad(kats, w) || `Kategorie ${w}`) : k === "material_kind" ? esc(MATERIALART[w] || w)
+      : k === "interval_months" ? esc(plural(+w, "Monat", "Monate")) : k === "lifetime_years" ? esc(plural(+w, "Jahr", "Jahre"))
+        : `<span class="mat-text">${esc(w)}</span>`;
+    return `${text}${f.vorbelegt ? "" : '<div class="small muted">wird nicht vorbelegt</div>'}`;
+  }
+  const belegMarke = (b) => (BELEG[b] ? `<span class="mat-beleg b-${esc(b)}">${esc(BELEG[b])}</span>` : "");
+  // Fundstelle: Link (Text = die Fundstelle, sonst die Adresse), Zitat, Beleg-Marke und Vermerk.
+  function fundstelleHtml(f) {
+    if (!f) return "";
+    const ort = f.quelle_url ? fremdLink(f.quelle_url, esc(f.fundstelle || kurzLink(f.quelle_url))) : esc(f.fundstelle || "");
+    return `${ort}${f.zitat ? `<div><span class="mat-text">„${esc(f.zitat)}“</span></div>` : ""}${belegMarke(f.beleg)}${f.vermerk ? `<div class="small muted">${esc(f.vermerk)}</div>` : ""}`;
+  }
+  const vorschlagZeile = (k, f, kats, anders) => `<tr><td class="mat-vs-feld">${esc(VORSCHLAG_FELD[k])}</td>
+    <td data-l="Vorschlag">${anders || vorschlagWert(k, f, kats)}</td><td data-l="Fundstelle">${anders ? "" : fundstelleHtml(f)}</td></tr>`;
+  const vorschlagTabelle = (zeilen) => `<table class="list mat-vs-tabelle"><thead><tr><th scope="col">Feld</th><th scope="col">Vorschlag</th><th scope="col">Fundstelle</th></tr></thead><tbody>${zeilen}</tbody></table>`;
+  // Was die Dokumentprüfung zu einer Datei sagt; dazu, ob sie schon im Katalog liegt. Nicht geladen: der Grund.
+  function dateiPruefung(f) {
+    if (!f.datei) return `<span class="mat-warn">${esc(f.fehler || "nicht geladen")}</span>`;
+    const p = f.pruefung;
+    const teile = [p ? (p.passt === "ja" ? `gehört zu ${esc((p.gehoert_zu || []).join(", ") || "–")}`
+      : p.passt === "nein" ? `<span class="mat-warn">gehört nicht dazu: ${esc(p.begruendung || "ohne Begründung")}</span>`
+        : `unklar${p.begruendung ? `: ${esc(p.begruendung)}` : ""}`)
+      : f.art === "produktbild" ? "" : `nicht geprüft${f.pruefung_fehler ? `: ${esc(f.pruefung_fehler)}` : ""}`];
+    if (f.im_katalog) teile.push(`liegt schon im Katalog als „${esc(f.im_katalog.titel)}“${f.im_katalog.produkt ? ` (${esc(f.im_katalog.produkt)})` : ""}`);
+    return teile.filter(Boolean).join("<br>");
+  }
+  const dateiHerkunft = (f) => (f.quelle === "webarchiv" ? `Webarchiv${f.stand ? `, Stand ${esc(fmtTag(f.stand))}` : ""}` : f.quelle === "hersteller" ? "Hersteller" : "fremde Seite");
+  const dateiArt = (f) => [f.art, ...(f.auch_als || [])].map((a) => esc(DOKART[a] || a)).join(", ");
+  // dateiUrl(n): die Adresse der Datei n des Vorschlags (an der Meldung bzw. am Lauf ohne Meldung).
+  function dateiZeile(dateiUrl, f) {
+    return `<tr><td data-l="Datei" class="mat-k-titel"><strong>${esc(f.titel)}</strong><div class="small muted">${dateiArt(f)}${f.sprache ? ` · ${esc(f.sprache)}` : ""}</div>
+        <div class="small mat-vs-adresse">${fremdLink(f.url)}</div></td>
+      <td data-l="Version">${esc(f.version || "")}</td><td data-l="Gültig ab">${esc(fmtTag(f.gueltig_ab) || "")}</td>
+      <td data-l="Größe">${f.datei ? `${esc(groesse(f.groesse))}${f.seiten ? ` · ${esc(plural(f.seiten, "Seite", "Seiten"))}` : ""}` : ""}</td>
+      <td data-l="Herkunft">${dateiHerkunft(f)}</td><td data-l="Prüfung">${dateiPruefung(f)}</td>
+      <td class="tabelle-aktionen">${f.datei ? `<a class="btn secondary small" href="${esc(dateiUrl(f.n))}" target="_blank" rel="noopener" aria-label="${esc(`${f.titel} öffnen`)}">Öffnen</a>` : ""}</td></tr>`;
+  }
+
+  // Bausteine, die „Vorschlag ansehen“ und der Reiter „Recherche“ im Produktdialog teilen: die Tabelle „Gemeinsam“, die
+  // Tabelle einer Ausführung, die Dateien, Hinweise und Rückfragen.
+  const gemeinsamTabelle = (v, kats, je) => vorschlagTabelle(GEMEINSAME_FELDER.map((k) => (je.includes(k) ? vorschlagZeile(k, null, kats, '<span class="muted">je Ausführung, siehe unten</span>') : v.gemeinsam[k] ? vorschlagZeile(k, v.gemeinsam[k], kats) : "")).join(""));
+  const ausfuehrungTabelle = (a, kats, je) => vorschlagTabelle(["article_no", "description", ...je].filter((k) => a.felder[k]).map((k) => vorschlagZeile(k, a.felder[k], kats)).join(""));
+  const dateienTabelle = (v, dateiUrl) => (v.dateien.length ? `<table class="list mat-vs-tabelle mat-vs-dateien"><thead><tr><th scope="col">Datei</th><th scope="col">Version</th><th scope="col">Gültig ab</th><th scope="col">Größe</th><th scope="col">Herkunft</th><th scope="col">Prüfung</th><th scope="col"><span class="nur-vorlesen">Aktion</span></th></tr></thead>
+        <tbody>${v.dateien.map((f) => dateiZeile(dateiUrl, f)).join("")}</tbody></table>` : leer("Keine Dateien gefunden."));
+  const vorschlagListen = (v) => `${v.hinweise.length ? `<h3>Hinweise</h3><ul class="mat-vs-liste">${v.hinweise.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+      ${v.rueckfragen.length ? `<h3>Rückfragen an den Hersteller</h3><ul class="mat-vs-liste">${v.rueckfragen.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}`;
+
+  async function vorschlagDialog(m, danach) {
+    let d, kats;
+    try { [d, kats] = await Promise.all([api(rechercheUrl(m)), kategorienLaden()]); } catch (e) { toast(e.message, true); return; }
+    const r = d.recherche;
+    const v = r && r.vorschlag;
+    if (!v) { toast("Zu dieser Meldung gibt es keinen Vorschlag mehr.", true); await danach(); return; }
+    const je = jeAusfuehrung(v);
+    const anlegbar = v.ausfuehrungen.filter((a) => a.anlegbar);
+    const geht = r.status === "fertig" && m.status === "offen" && anlegbar.length;
+    const e = r.eingabe || {};
+    const mit = [e.fotos ? plural(e.fotos, "Foto", "Fotos") : "", e.bemerkung ? "der Bemerkung" : ""].filter(Boolean).join(" und ");
+    const ausfuehrung = (a) => {
+      const bild = a.bild ? v.dateien.find((f) => f.n === a.bild) : null;
+      const nr = a.felder.article_no && a.felder.article_no.wert;
+      return `<section class="mat-vs-ausf"><div class="mat-vs-ausf-kopf"><div><h4>Ausführung ${a.nr}${nr ? `: <span class="mat-ganz">${esc(nr)}</span>` : ""}</h4>
+        ${a.im_katalog ? `<p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}">${esc(a.im_katalog.name)}</a>.</p>` : ""}</div>
+        ${bild && bild.datei ? `<a class="mat-vs-bild" href="${esc(rechercheDatei(m, bild.n))}" target="_blank" rel="noopener"><img src="${esc(rechercheDatei(m, bild.n))}" alt="${esc(`Bild ${nr || `der Ausführung ${a.nr}`}`)}" loading="lazy"></a>` : ""}</div>
+        ${ausfuehrungTabelle(a, kats, je)}</section>`;
+    };
+    // V1: Nichts anlegbar an einer offenen Meldung – ein Satz mit dem Weg; V5: „Fehlendes nachladen“ nur, wenn etwas fehlt.
+    const nichts = r.status === "fertig" && m.status === "offen" && !anlegbar.length;
+    const fehlt = r.status === "uebernommen" && r.fehlt > 0;
+    dialog(`<div class="mat-vorschlag"><h2 tabindex="-1">Vorschlag für „${esc(meldungName(m))}“</h2>
+      <p class="small muted">${rechercheVom(r)}${rechercheKosten(r)}${(e.domains || []).length ? ` · Herstellerseite ${esc(e.domains.join(", "))}` : ""}${mit ? ` · mit ${esc(mit)}` : ""}</p>
+      ${r.status === "uebernommen" ? `<p>Übernommen: ${(r.produkte || []).length ? produktLinks(r.produkte) : '<span class="muted">Produkte inzwischen gelöscht</span>'}</p>` : ""}
+      ${v.ausweichmodell ? `<p class="notice">Geantwortet hat auch das Ausweichmodell ${esc(v.ausweichmodell)} – die Kosten sind nur geschätzt.</p>` : ""}
+      <h3>Gemeinsam</h3>
+      ${gemeinsamTabelle(v, kats, je)}
+      <h3>Ausführungen</h3>
+      ${v.ausfuehrungen.length ? v.ausfuehrungen.map(ausfuehrung).join("") : leer("Keine Ausführung gefunden.")}
+      <h3>Dateien</h3>
+      ${dateienTabelle(v, (n) => rechercheDatei(m, n))}
+      ${vorschlagListen(v)}
+      ${nichts ? '<p class="notice">Alle Ausführungen stehen schon im Katalog – es gibt nichts anzulegen. Nutze „Vorhandenes zuordnen“ an der Meldung.</p>' : ""}
+      ${r.status === "uebernommen" ? `<p class="help">${fehlt ? `${esc(plural(r.fehlt, "gewählte Datei hängt", "gewählte Dateien hängen"))} noch nicht am Produkt.` : "Alle gewählten Dateien sind angehängt."}</p>` : ""}</div>
+      <div class="dlg-actions"><button class="btn secondary" data-close type="button">Schließen</button>${fehlt ? '<button class="btn secondary" id="vs-nach" type="button">Fehlendes nachladen</button>' : ""}${geht ? `<button class="btn" id="vs-anlegen" type="button">${anlegbar.length === 1 ? "Produkt anlegen" : "Produkte anlegen"}</button>` : ""}</div>`,
+    (dlg, body) => {
+      // V9: Der Fokus beginnt an der Überschrift (vorher auf dem ersten Link der Tabelle).
+      $("h2", body).focus({ preventScroll: true });
+      if ($("#vs-anlegen", body)) $("#vs-anlegen", body).onclick = () => uebernahmeDialog(m, r, kats, danach);
+      if ($("#vs-nach", body)) $("#vs-nach", body).onclick = (ev) => nachladen(m, ev.currentTarget, body, danach);
+    });
+  }
+
+  /* --- Übernahme: ein Dialog für eine oder mehrere Ausführungen ------------------------------------------------------
+     Oben die gemeinsamen Felder aus produktFelderHtml (vorbelegt nur, was der Vorschlag vorbelegt, alles änderbar, die
+     Fundstelle als Hilfetext am Feld), darunter je Ausführung Häkchen „anlegen“ (vorgewählt die gemeldete Artikelnummer,
+     ohne sie – oder wenn sie nicht dabei ist – alle anlegbaren), Artikelnummer, Bemerkung, die abweichenden Felder und
+     das Bild; Ausführungen im Katalog stehen ohne Häkchen da. Dann die Dateien (Vorwahl laut Prüfung, je Datei an die
+     Ausführungen, zu denen sie gehört) und die Anmerkung für den Melder. „Anlegen“ legt alle in einer Anfrage an und
+     erledigt die Meldung; was beim Anhängen der Dateien scheiterte, steht danach im Dialog mit „Fehlendes nachladen“. */
+  // Je Feld das Eingabeelement wie im Produktdialog (Grenzen wie dort); attrs: weiteres Attribut-HTML.
+  const AUSF_EINGABE = {
+    material_kind: (id, w, attrs) => `<select id="${id}" data-feld="material_kind"${attrs}>${Object.entries(MATERIALART).map(([x, t]) => `<option value="${x}" ${w === x ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`,
+    // Norm und Fundstelle zweizeilig (V8): Lange vorbelegte Werte stehen ganz da; Enter bricht nicht um (data-einzeilig).
+    norm: (id, w, attrs) => `<textarea id="${id}" data-feld="norm" rows="2" maxlength="200" data-einzeilig ${TASTATUR_NUMMER}${attrs}>${esc(w || "")}</textarea>`,
+    interval_months: (id, w, attrs) => `<input type="number" id="${id}" data-feld="interval_months" min="1" max="120" value="${esc(w || "")}"${attrs}>`,
+    lifetime_years: (id, w, attrs) => `<input type="number" id="${id}" data-feld="lifetime_years" min="1" max="50" value="${esc(w || "")}"${attrs}>`,
+    lifetime_source: (id, w, attrs) => `<textarea id="${id}" data-feld="lifetime_source" rows="2" maxlength="300" data-einzeilig${attrs}>${esc(w || "")}</textarea>`,
+  };
+  const AUSF_LABEL = { material_kind: "Materialart", norm: "Norm", interval_months: "Prüfintervall (Monate)", lifetime_years: "Lebensdauer (Jahre)",
+                       lifetime_source: "Fundstelle der Lebensdauer" };
+  // Die Fundstelle eines Felds als Hilfetext: vorbelegt mit Link und Zitat, sonst der Wert, der nicht vorbelegt ist.
+  function quelleHilfe(f) {
+    if (!f) return "";
+    const vermerk = f.vermerk ? ` · ${esc(f.vermerk)}` : "";
+    if (!f.vorbelegt) return f.wert === null || f.wert === undefined || f.wert === "" ? (f.vermerk ? esc(f.vermerk) : "")
+      : `Nicht vorbelegt (${esc(BELEG[f.beleg] || f.beleg)}): ${esc(String(f.wert))}${vermerk}`;
+    const ort = f.quelle_url ? fremdLink(f.quelle_url, esc(f.fundstelle || kurzLink(f.quelle_url))) : esc(f.fundstelle || "");
+    const archiv = f.beleg === "webarchiv" ? " (Webarchiv)" : "";
+    return ort ? `Fundstelle: ${ort}${archiv}${f.zitat ? ` – „${esc(f.zitat)}“` : ""}${vermerk}` : esc(f.vermerk || "");
+  }
+
+  function uebernahmeDialog(m, r, kats, danach) {
+    const v = r.vorschlag, gem = v.gemeinsam;
+    const je = jeAusfuehrung(v);
+    const anlegbar = v.ausfuehrungen.filter((a) => a.anlegbar);
+    const gemeldet = vergleichbar(m.article_no);
+    const treffer = gemeldet ? anlegbar.filter((a) => vergleichbar(a.felder.article_no && a.felder.article_no.wert) === gemeldet) : [];
+    const vorgewaehlt = new Set((treffer.length ? treffer : anlegbar).map((a) => a.nr));
+    const wert = (f) => (f && f.vorbelegt ? f.wert : null);
+    const p = {}, quelle = {};
+    GEMEINSAME_FELDER.filter((k) => !je.includes(k)).forEach((k) => { p[k] = wert(gem[k]); quelle[k] = quelleHilfe(gem[k]); });
+    const nummer = (a) => (a.felder.article_no && a.felder.article_no.wert) || `Ausführung ${a.nr}`;
+    // Eine Datei gehört zu den Ausführungen laut Prüfung (gehoert_zu); ohne Angabe zu allen. Angehängt wird sie nur an
+    // anlegbare.
+    const fuer = (f) => (f.gehoert_zu.length ? f.gehoert_zu : anlegbar.map((a) => a.nr)).filter((n) => anlegbar.some((a) => a.nr === n));
+    const dokumente = v.dateien.filter((f) => f.art !== "produktbild");
+    const dateiWahl = (f) => {
+      const zu = fuer(f);
+      const art = `${esc(DOKART[f.art] || f.art)}${f.version ? `, ${esc(f.version)}` : ""}`;
+      if (f.anbieten && zu.length) {
+        return `<label class="inline"><input type="checkbox" class="ue-datei" value="${f.n}" ${f.vorgewaehlt ? "checked" : ""}> ${esc(f.titel)}
+          <span class="muted small">${art} · für ${esc(zu.map((n) => nummer(anlegbar.find((a) => a.nr === n))).join(", "))}</span></label>`;
+      }
+      const grund = !f.anbieten ? f.fehler || (f.pruefung && f.pruefung.passt === "nein" ? `gehört nicht dazu: ${f.pruefung.begruendung || "ohne Begründung"}` : "nicht angeboten")
+        : "gehört nur zu Ausführungen, die schon im Katalog stehen";
+      // Der Titel selbst ist der Link zur Quelle (V7: vorher dreimal „Link“).
+      return `<p class="small mat-ue-nicht">${f.url ? fremdLink(f.url, esc(f.titel)) : esc(f.titel)} <span class="muted">(${art})</span> – ${esc(grund)}</p>`;
+    };
+    const ausfuehrung = (a) => {
+      const f = a.felder;
+      const nr = f.article_no && f.article_no.wert;
+      if (!a.anlegbar) {
+        return `<fieldset class="mat-ue-ausf nicht" data-nr="${a.nr}"><legend>Ausführung ${a.nr}${nr ? `: ${esc(nr)}` : ""}</legend>
+          <p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}" target="_blank" rel="noopener">${esc(a.im_katalog.name)}</a> – lässt sich nicht anlegen.</p></fieldset>`;
+      }
+      const id = (k) => `ue-${a.nr}-${k}`;
+      const hilfe = (k) => (quelleHilfe(f[k]) ? `<div class="help mat-fundstelle" id="${id(k)}-quelle">${quelleHilfe(f[k])}</div>` : "");
+      const zu = (k) => (quelleHilfe(f[k]) ? ` aria-describedby="${id(k)}-quelle"` : "");
+      const zellen = je.map((k) => `<div><label for="${id(k)}">${AUSF_LABEL[k]}</label>${AUSF_EINGABE[k](id(k), wert(f[k]), zu(k))}${hilfe(k)}</div>`);
+      const reihen = [];
+      for (let i = 0; i < zellen.length; i += 2) reihen.push(`<div class="field-row">${zellen.slice(i, i + 2).join("")}</div>`);
+      const bild = a.bild ? v.dateien.find((x) => x.n === a.bild) : null;
+      return `<fieldset class="mat-ue-ausf" data-nr="${a.nr}"><legend>Ausführung ${a.nr}</legend>
+        <label class="inline mat-ue-an"><input type="checkbox" class="ue-an" ${vorgewaehlt.has(a.nr) ? "checked" : ""}> anlegen</label>
+        <div class="mat-ue-felder"><div class="field-row"><div><label for="${id("art")}">Artikelnummer des Herstellers</label><input type="text" id="${id("art")}" class="ue-art" maxlength="80" value="${esc(wert(f.article_no) || "")}" ${TASTATUR_NUMMER}${zu("article_no")}>${hilfe("article_no")}<div class="help" id="${id("art")}-hilfe"></div></div>
+          <div><label for="${id("desc")}">Bemerkung</label><input type="text" id="${id("desc")}" class="ue-desc" maxlength="${BESCHREIBUNG_MAX}" value="${esc(wert(f.description) || "")}" ${TASTATUR_NAME}${zu("description")}>${hilfe("description")}</div></div>
+        ${reihen.join("")}
+        ${bild && bild.anbieten ? `<label class="inline mat-ue-bild"><input type="checkbox" class="ue-bild" ${bild.vorgewaehlt ? "checked" : ""}> Bild übernehmen <img src="${esc(rechercheDatei(m, bild.n))}" alt="" loading="lazy"></label>` : ""}
+        <p class="error mat-ue-fehler" role="alert" hidden></p></div></fieldset>`;
+    };
+    const titel = anlegbar.length === 1 ? "Produkt aus der Recherche anlegen" : "Produkte aus der Recherche anlegen";
+    dialog(`<div class="mat-vorschlag"><h2 tabindex="-1">${titel}</h2>
+      <p class="help">Für „${esc(meldungName(m))}“. Vorbelegt ist nur, was die Recherche belegt hat – prüfe jedes Feld; die Fundstelle steht darunter.</p>
+      <h3>Gemeinsam</h3>
+      ${produktFelderHtml(p, kats, { ohne: ["article_no", "description", ...je], quelle, mehrzeilig: true })}
+      <h3>Ausführungen</h3>
+      ${v.ausfuehrungen.map(ausfuehrung).join("")}
+      <fieldset class="mat-variante-doks mat-ue-dateien"><legend>Dateien aus der Recherche</legend>
+        ${dokumente.length ? dokumente.map(dateiWahl).join("") : '<p class="help">Die Recherche hat keine Dokumente gefunden.</p>'}</fieldset>
+      <label for="ue-antwort">Anmerkung für den Melder (optional, steht in seiner Mail)</label><textarea id="ue-antwort" rows="2" maxlength="1000"></textarea>
+      ${grundSatz("ue-grund", vorgewaehlt.size ? "" : "Wähle mindestens eine Ausführung.")}</div>
+      <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="ue-ok" type="button"${knopfAus("ue-grund", vorgewaehlt.size ? "" : "Wähle mindestens eine Ausführung.")}>Anlegen</button></div>`,
+    (dlg, body) => {
+      const felder = produktFelderVerdrahten(body, kats, { neu: true });
+      const knopf = $("#ue-ok", body);
+      const kasten = $$(".mat-ue-ausf:not(.nicht)", body);
+      // B1: Der Inhalt des offenen Dialogs wurde ersetzt (der gedrückte Knopf ist weg) – der Fokus gehört in den Dialog.
+      $("h2", body).focus({ preventScroll: true });
+      $$("textarea[data-einzeilig]", body).forEach((t) => t.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); }));
+      // V9: Esc fragt nach, wenn schon etwas geändert ist – nur solange dieser Inhalt im Dialog steht.
+      let geaendert = false;
+      body.addEventListener("input", () => { geaendert = true; });
+      body.addEventListener("change", () => { geaendert = true; });
+      const escFrage = (e) => {
+        if (!body.contains(knopf)) { dlg.removeEventListener("cancel", escFrage); return; }
+        if (!geaendert) return;
+        e.preventDefault();
+        confirm("Eingaben verwerfen? Die Produkte werden dann nicht angelegt.", "Verwerfen", "Weiter bearbeiten", { endgueltig: false })
+          .then((ja) => { if (ja) dlg.close(); });
+      };
+      dlg.addEventListener("cancel", escFrage);
+      dlg.addEventListener("close", () => dlg.removeEventListener("cancel", escFrage), { once: true });
+      // Abgewählt: die Felder der Ausführung ruhen (ausgegraut und inert – auch ihre Links), und ohne gewählte
+      // Ausführung ist „Anlegen“ aus.
+      const wahl = () => {
+        kasten.forEach((fs) => {
+          const an = $(".ue-an", fs).checked;
+          fs.classList.toggle("aus", !an);
+          $(".mat-ue-felder", fs).inert = !an;
+          $$("input:not(.ue-an), select, textarea", fs).forEach((el) => { el.disabled = !an; });
+        });
+        knopfGrund(knopf, kasten.some((fs) => $(".ue-an", fs).checked) ? "" : "Wähle mindestens eine Ausführung.");
+      };
+      kasten.forEach((fs) => {
+        $(".ue-an", fs).addEventListener("change", wahl);
+        artikelnummerPruefen($(".ue-art", fs), $("#pd-her", body), $(`#ue-${fs.dataset.nr}-art-hilfe`, body), null);
+      });
+      wahl();
+      knopf.onclick = async () => {
+        $$(".mat-ue-fehler", body).forEach((x) => { x.hidden = true; });
+        const gewaehlt = $$(".ue-datei:checked", body).map((c) => dokumente.find((f) => f.n === +c.value));
+        const ausf = [];
+        for (const fs of kasten.filter((x) => $(".ue-an", x).checked)) {
+          const nr = +fs.dataset.nr;
+          const desc = $(".ue-desc", fs);
+          const laenge = desc.value.replace(/\s+/g, " ").trim().length;
+          if (laenge > BESCHREIBUNG_MAX) { S.feldFehler(desc, `Die Bemerkung ist ein kurzer Zusatz hinter dem Namen – höchstens ${BESCHREIBUNG_MAX} Zeichen, hier sind es ${laenge}.`); return; }
+          const x = { nr, article_no: $(".ue-art", fs).value, description: desc.value, dateien: gewaehlt.filter((f) => fuer(f).includes(nr)).map((f) => f.n) };
+          $$("[data-feld]", fs).forEach((el) => { x[el.dataset.feld] = el.type === "number" ? el.value || null : el.value; });
+          if ($(".ue-bild", fs)) x.bild = $(".ue-bild", fs).checked;
+          ausf.push(x);
+        }
+        knopf.disabled = true;
+        try {
+          const res = await api(rechercheUrl(m, "/uebernehmen"), { method: "POST", body: { gemeinsam: felder.daten(), ausfuehrungen: ausf, antwort: $("#ue-antwort", body).value } });
+          const a = res.anhaengen;
+          toast(`${plural(res.produkte.length, "Produkt", "Produkte")} angelegt${a.angehaengt ? `, ${plural(a.angehaengt, "Datei", "Dateien")} angehängt` : ""}`);
+          if (a.fehler.length) anhaengenErgebnis(m, res, danach);
+          else dlg.close();
+          await danach();
+        } catch (e) {
+          // „Ausführung 2 (PR-2): …“ an die Ausführung; sonst am Feld („Kategorie“ …) oder als Toast.
+          const t = /^Ausführung (\d+)\b/.exec(e.message);
+          const fs = t && $(`.mat-ue-ausf[data-nr="${t[1]}"]`, body);
+          if (fs) {
+            knopf.disabled = false;
+            // B2: Betrifft der Fehler die Artikelnummer (schon im Katalog, vergeben), steht er am Feld – aria-invalid,
+            // Satz darunter, Fokus; sonst als Satz in der Ausführung, der Fokus auf ihre Artikelnummer.
+            const art = $(".ue-art", fs);
+            if (art && /Artikelnummer|im Katalog|vergeben/i.test(e.message)) S.feldFehler(art, e.message);
+            else {
+              const el = $(".mat-ue-fehler", fs);
+              el.textContent = e.message; el.hidden = false;
+              fs.scrollIntoView({ block: "nearest" });
+              if (art) art.focus({ preventScroll: true });
+            }
+          } else S.fehlschlag(knopf, e, body);
+          if (e.status === 409 && /erledigt|zwischenzeitlich/.test(e.message)) await danach();
+        }
+      };
+    });
+  }
+
+  // Nach der Übernahme: was beim Anhängen fehlt – mit Link zur Quelle und „Fehlendes nachladen“ (POST …/nachladen).
+  function anhaengenErgebnis(m, res, danach) {
+    const a = res.anhaengen;
+    const produkt = (pid) => res.produkte.find((x) => x.id === pid);
+    dialog(`<h2>Nicht alle Dateien angehängt</h2>
+      <p>Angelegt: ${produktLinks(res.produkte)}. ${a.angehaengt ? `${esc(plural(a.angehaengt, "Datei", "Dateien"))} angehängt` : "Keine Datei angehängt"}${a.uebersprungen ? `, ${esc(plural(a.uebersprungen, "war", "waren"))} schon da` : ""}. Es fehlen:</p>
+      <ul class="mat-vs-liste">${a.fehler.map((f) => { const p = produkt(f.product_id); const titel = `<strong>${esc(f.titel || "Datei")}</strong>`; return `<li>${f.url ? fremdLink(f.url, titel) : titel}${p ? ` an ${nameHtml(p)}${zusatzHtml(p)}${artNrKurz(p.article_no)}` : ""}: ${esc(f.fehler)}</li>`; }).join("")}</ul>
+      <div class="dlg-actions"><button class="btn secondary" data-close type="button">Schließen</button><button class="btn" id="ue-nach" type="button">Fehlendes nachladen</button></div>`,
+    (dlg, body) => {
+      // V5: „Fehlendes nachladen“ ist hier die Hauptaktion; B1: der Fokus steht auf ihr (der Dialog ersetzte den vorigen).
+      const nach = $("#ue-nach", body);
+      nach.onclick = (ev) => nachladen(m, ev.currentTarget, body, danach);
+      nach.focus();
+    });
+  }
+  async function nachladen(m, knopf, body, danach) {
+    knopf.disabled = true;
+    try {
+      const res = await api(rechercheUrl(m, "/nachladen"), { method: "POST", body: {} });
+      const a = res.anhaengen;
+      toast(a.angehaengt ? `${plural(a.angehaengt, "Datei", "Dateien")} nachgeladen` : a.fehler.length ? "Nichts nachgeladen" : "Alle Dateien hängen schon an");
+      if (a.fehler.length) anhaengenErgebnis(m, res, danach);
+      else document.getElementById("dlg").close();
+      await danach();
+    } catch (e) { S.fehlschlag(knopf, e, body); }
+  }
+
+  /* --- Reiter „Recherche“ im Produktdialog (22.11.2026; entwurf_recherche_reiter_produkt.md, „Alles Empfehlung“) -----
+     Nur für die Material-Verwaltung mit API-Schlüssel (DARF.recherche) in „Produkt anlegen“ und „Produkt aus Meldung
+     anlegen“. Ohne Meldung recherchiert er mit den Angaben aus dem Reiter „Produkt“ (gelesen bei jedem Wechsel hierher,
+     B1 A) und zeigt den jüngsten eigenen Lauf (GET /recherche, C1 A); aus einer Meldung liest und startet er über deren
+     Routen – ein Lauf für Karte und Reiter (E1 A), mit den Häkchen für Fotos und Bemerkung wie im Startdialog. Läuft er,
+     fragt der Reiter alle 5 s nach (nur bei offenem Dialog und sichtbarer Seite), schließen lässt er sich trotzdem (F2 A).
+     Fertig: die Bausteine von „Vorschlag ansehen“ mit einem Optionsfeld je Ausführung (D3 A) und „In die Felder
+     übernehmen“ (D1 A): Werte mit „vorbelegt“ überschreiben die Felder (D2 A), die Fundstelle steht darunter, unter dem
+     Bildfeld erscheint „Dateien aus der Recherche“ (D4 A). Die Knöpfe hier sind grau – „Anlegen“ in der Knopfzeile
+     bleibt die eine Hauptaktion (A4 A); nach dem Anlegen hängt anhaengen() die gewählten Dateien an. */
+  function rechercheStandLaden(p) {
+    const url = p.meldung ? rechercheUrl(p.meldung) : `${API}/recherche?${new URLSearchParams({ hersteller: p.manufacturer || "" })}`;
+    return api(url).catch(() => null);         // ohne Antwort zeigt der Reiter den Satz und lädt beim Wechsel neu
+  }
+  // Fehler 400 beim Start, die ein Feld des Reiters „Produkt“ meinen (Texte aus services.text und katalog.beschreibung).
+  const RS_FELD_FEHLER = [["Hersteller", "pd-her"], ["Modell", "pd-mod"], ["Artikelnummer", "pd-art"], ["Norm", "pd-norm"],
+                          ["Kategorie", "pd-kat"], ["Bemerkung", "pd-desc"]];
+  const RS_FELDER = ["category_id", "manufacturer", "model", "article_no", "description", "material_kind", "norm",
+                     "interval_months", "lifetime_years", "lifetime_source"];
+  function rechercheReiter(o) {
+    const { dlg, body, p, kats, felder, reiterZeigen, bildWahl } = o;
+    const teil = $("#pd-teil-recherche", body);
+    const m = p.meldung || null;
+    const url = {
+      lesen: (her) => (m ? rechercheUrl(m) : `${API}/recherche?${new URLSearchParams({ hersteller: her || "" })}`),
+      starten: () => (m ? rechercheUrl(m) : `${API}/recherche`),
+      stand: (r) => (m ? rechercheUrl(m) : `${API}/recherche/${r.id}`),
+      abbrechen: (r) => (m ? rechercheUrl(m, "/abbrechen") : `${API}/recherche/${r.id}/abbrechen`),
+      datei: (r, n) => (m ? rechercheDatei(m, n) : `${API}/recherche/${r.id}/dateien/${n}`),
+    };
+    let d = o.stand;                 // {recherche, moeglich, start} – null: nicht geladen
+    let geladenFuer = p.manufacturer || "";
+    let domains = null;              // Eingabe im Feld „Herstellerseite“ – null: der Vorschlag des Servers
+    const haken = { fotos: false, bemerkung: false };
+    let nr = null;                   // gewählte Ausführung
+    let neuOffen = false;            // „Erneut recherchieren“ unter dem Vorschlag aufgeklappt
+    let hinweis = null;              // E3: zum Produkt gibt es eine offene Meldung (Antwort des Starts)
+    let startFehler = null;          // {text, produkt}: 409 (auch E2), 429, 503 beim Start
+    let gestartet = "";              // Name des Produkts beim Start (für den Toast am Ende)
+    let uebernahme = null;           // {lauf, a, felder} nach „In die Felder übernehmen“
+    let fest = null;                 // Ausführung, aus der das Produkt schon angelegt ist (S2: danach keine andere)
+    let nachfrage = null;
+    const aus = new AbortController();
+    dlg.addEventListener("close", () => { aus.abort(); clearTimeout(nachfrage); }, { once: true });
+    // Offen heißt: derselbe Dialog steht noch da (S.dialog ersetzt sonst den Inhalt von #dlg).
+    const offen = () => dlg.open && body.contains(teil);
+    const lauf = () => (d ? d.recherche : null);
+    function angaben() {
+      if (m) return { manufacturer: m.manufacturer || "", model: m.model || "", article_no: m.article_no || "" };
+      const x = felder.daten();
+      return { manufacturer: (x.manufacturer || "").trim(), model: (x.model || "").trim(), article_no: (x.article_no || "").trim(),
+               norm: x.norm || "", category_id: x.category_id || null, description: x.description || "" };
+    }
+    const laufName = () => {
+      const e = lauf() && lauf().eingabe && lauf().eingabe.meldung;
+      return e ? `${e.hersteller} ${e.modell}` : gestartet || `${angaben().manufacturer} ${angaben().model}`.trim();
+    };
+    const anlegbar = (r) => (r && r.vorschlag ? r.vorschlag.ausfuehrungen.filter((a) => a.anlegbar) : []);
+
+    function startHtml(r) {
+      const s = d.start;
+      if (!s) return '<p>Die Recherche ist gerade nicht eingerichtet.</p>';
+      const x = angaben();
+      const name = `${x.manufacturer} ${x.model}`.trim();
+      const grund = !m && (!x.manufacturer || !x.model) ? "Bitte zuerst im Reiter „Produkt“ Hersteller und Modell eintragen."
+        : startFehler ? startFehler.text : d.moeglich && !d.moeglich.an ? d.moeglich.grund : "";
+      const herkunft = (s.domains_aus_links || []).length;
+      // Ist das Kontingent selbst der Sperrgrund („Kontingent für … aufgebraucht“), steht nur dieser Satz da.
+      const kontingent = d.moeglich && !(grund && grund === d.moeglich.grund && !d.moeglich.rest && grund.startsWith("Kontingent"));
+      return `${r && r.vorschlag && anlegbar(r).length ? `<p>Die neue Recherche ersetzt den Vorschlag vom ${esc(fmtZeit(r.gestartet_am))}.</p>` : ""}
+        <p>${m ? "Recherchiert wird die Meldung" : "Recherchiert wird"}: ${name ? `<strong>${esc(name)}</strong>${x.article_no ? ` <span class="mat-ganz">(${esc(x.article_no)})</span>` : ""}` : '<span class="muted">noch ohne Hersteller und Modell</span>'}</p>
+        <label for="pd-rs-domains">Herstellerseite</label>
+        <input type="text" id="pd-rs-domains" value="${esc(domains !== null ? domains : s.domains.join(", "))}" ${TASTATUR_ADRESSE} aria-describedby="pd-rs-domains-hilfe${herkunft ? " pd-rs-domains-herkunft" : ""}">
+        <div class="help" id="pd-rs-domains-hilfe">Eine bis drei Domains, durch Komma getrennt, z. B. hersteller.de. Nur dort ruft Claude Seiten ab und lädt der Server Dateien.</div>
+        ${herkunft ? `<p class="help mat-recherche-herkunft" id="pd-rs-domains-herkunft">Aus einem Link der Meldung: ${s.domains_aus_links.map((y) => `<span class="mat-ganz">${esc(y)}</span>`).join(", ")} – bitte prüfen, ob die Seite wirklich dem Hersteller gehört.</p>` : ""}
+        ${m && s.fotos ? `<label class="inline"><input type="checkbox" id="pd-rs-fotos"${haken.fotos ? " checked" : ""}> ${esc(plural(s.fotos, "Foto", "Fotos"))} mitschicken</label>` : ""}
+        ${m && s.bemerkung ? `<div class="mat-feldkopf">Bemerkung des Melders</div><p class="mat-text mat-recherche-bemerkung">${esc(s.bemerkung)}</p>
+          <label class="inline"><input type="checkbox" id="pd-rs-bemerkung"${haken.bemerkung ? " checked" : ""}> Bemerkung mitschicken</label>` : ""}
+        ${datenschutzHtml(s.datenschutz)}
+        ${kontingent ? `<p class="help">Kontingent: noch ${d.moeglich.rest} von ${d.moeglich.grenze} in diesem Monat.</p>` : ""}
+        ${grundSatz("pd-rs-grund", grund)}
+        ${startFehler && startFehler.produkt ? `<p class="help"><a href="/materialablage/katalog/produkt/${startFehler.produkt.id}" target="_blank" rel="noopener">${esc(startFehler.produkt.name)} öffnen</a></p>` : ""}
+        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-los"${knopfAus("pd-rs-grund", grund)}>${r && !r.vorschlag ? "Erneut recherchieren" : "Recherchieren lassen"}</button></div>`;
+    }
+    const verwerfenKnopf = () => (m ? "" : ' <button type="button" class="lnk" id="pd-rs-verwerfen">Verwerfen</button>');
+    function laufHtml(r) {
+      return `<p class="mat-recherche-zeile"><span class="mat-recherche-stand" role="status" tabindex="-1">${esc(rechercheStand(r))}</span>
+          <button type="button" class="lnk" id="pd-rs-abbrechen">Recherche abbrechen</button></p>
+        <p class="help">Die Recherche läuft weiter, wenn du den Dialog schließt – du findest sie hier wieder.</p>`;
+    }
+    function endeHtml(r) {
+      const grund = r.status === "abgebrochen" && (!r.fehler || r.fehler === "Abgebrochen.") ? "." : `: <span class="mat-text">${esc(r.fehler || "ohne Angabe")}</span>`;
+      return `<p class="mat-recherche-zeile"><span>${rechercheVom(r)}${rechercheKosten(r)} – ${r.status === "abgebrochen" ? "abgebrochen" : "gescheitert"}${grund}</span>${verwerfenKnopf()}</p>`;
+    }
+    function vorschlagHtml(r) {
+      const v = r.vorschlag, e = r.eingabe || {};
+      const je = jeAusfuehrung(v);
+      const frei = anlegbar(r);
+      // D3 A: vorgewählt die Ausführung mit der Artikelnummer aus dem Reiter „Produkt“, sonst die erste anlegbare. Ist
+      // das Produkt schon angelegt (Teilfehler), bleibt seine Ausführung gewählt und die anderen sind gesperrt (S2).
+      if (fest !== null) nr = fest;
+      else if (!frei.some((a) => a.nr === nr)) {
+        const eigen = vergleichbar(angaben().article_no);
+        nr = ((eigen && frei.find((a) => vergleichbar(a.felder.article_no && a.felder.article_no.wert) === eigen)) || frei[0] || {}).nr || null;
+      }
+      const ausfuehrung = (a) => {
+        const bild = a.bild ? v.dateien.find((f) => f.n === a.bild) : null;
+        const anr = a.felder.article_no && a.felder.article_no.wert;
+        return `<section class="mat-vs-ausf${a.anlegbar ? "" : " nicht"}"><div class="mat-vs-ausf-kopf"><div>
+          <label class="inline mat-rs-wahl"><input type="radio" name="pd-rs-nr" value="${a.nr}"${a.nr === nr ? " checked" : ""}${(fest === null ? a.anlegbar : a.nr === fest) ? "" : " disabled"}> Ausführung ${a.nr}${anr ? `: <span class="mat-ganz">${esc(anr)}</span>` : ""}</label>
+          ${a.im_katalog ? `<p class="small">Steht schon im Katalog als <a href="/materialablage/katalog/produkt/${a.im_katalog.id}" target="_blank" rel="noopener">${esc(a.im_katalog.name)}</a>.</p>` : ""}</div>
+          ${bild && bild.datei ? `<a class="mat-vs-bild" href="${esc(url.datei(r, bild.n))}" target="_blank" rel="noopener"><img src="${esc(url.datei(r, bild.n))}" alt="${esc(`Bild ${anr || `der Ausführung ${a.nr}`}`)}" loading="lazy"></a>` : ""}</div>
+          ${ausfuehrungTabelle(a, kats, je)}</section>`;
+      };
+      const grund = frei.length || fest !== null ? "" : "Alle Ausführungen stehen schon im Katalog – es gibt nichts zu übernehmen.";
+      return `<p class="small muted mat-rs-kopf">Vorschlag vom <span class="name-einheit">${esc(fmtZeit(r.gestartet_am))}${r.von ? ` (${person(r.von)})` : ""}</span>${rechercheKosten(r)}${(e.domains || []).length ? ` · Herstellerseite ${esc(e.domains.join(", "))}` : ""}${verwerfenKnopf()}</p>
+        ${r.status === "uebernommen" && (r.produkte || []).length ? `<p>Daraus angelegt: ${produktLinks(r.produkte)}</p>` : ""}
+        ${fest !== null ? `<p class="help">Das Produkt ist aus Ausführung ${fest} angelegt – die Wahl bleibt.</p>` : m && frei.length > 1 ? "<p class=\"help\">Mehrere Ausführungen auf einmal: „Vorschlag ansehen“ an der Meldung.</p>" : ""}
+        ${v.ausweichmodell ? `<p class="notice">Geantwortet hat auch das Ausweichmodell ${esc(v.ausweichmodell)} – die Kosten sind nur geschätzt.</p>` : ""}
+        <h3>Gemeinsam</h3>
+        ${gemeinsamTabelle(v, kats, je)}
+        <h3 id="pd-rs-ausf-titel">Ausführungen</h3>
+        <div role="radiogroup" aria-labelledby="pd-rs-ausf-titel">${v.ausfuehrungen.length ? v.ausfuehrungen.map(ausfuehrung).join("") : leer("Keine Ausführung gefunden.")}</div>
+        <h3>Dateien</h3>
+        ${dateienTabelle(v, (n) => url.datei(r, n))}
+        ${vorschlagListen(v)}
+        ${grundSatz("pd-rs-ue-grund", grund)}
+        <div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-uebernehmen"${knopfAus("pd-rs-ue-grund", grund)}>In die Felder übernehmen</button></div>
+        <p class="mat-rs-neu"><button type="button" class="lnk" id="pd-rs-neu" aria-expanded="${neuOffen}" aria-controls="pd-rs-startteil">Erneut recherchieren</button></p>
+        <div id="pd-rs-startteil"${neuOffen ? "" : " hidden"}>${startHtml(r)}</div>`;
+    }
+
+    function zeichnen() {
+      if (!d) {
+        teil.innerHTML = '<p>Der Stand der Recherche ließ sich nicht laden.</p><div class="btn-row"><button type="button" class="btn secondary" id="pd-rs-laden">Erneut laden</button></div>';
+        $("#pd-rs-laden", teil).onclick = () => zeigen(true);
+        hinweisZeigen();
+        return;
+      }
+      const r = lauf();
+      const oben = hinweis ? `<p class="notice">${esc(hinweis.text)} <a href="/materialablage/katalog/meldungen" target="_blank" rel="noopener">Zu den Produktmeldungen</a></p>` : "";
+      // AB4 (3.4): Gibt es keine anlegbare Ausführung mehr (alle stehen im Katalog), steht der Startteil da, gleich in
+      // welchem Status – über ihm ein Satz, warum. Ein Vorschlag ganz ohne Ausführung bleibt stehen.
+      const nichtsMehr = r && r.vorschlag && r.vorschlag.ausfuehrungen.length && !anlegbar(r).length && fest === null;
+      teil.innerHTML = oben + (rechercheLaeuft(r) ? laufHtml(r)
+        : nichtsMehr ? `<p>Alle Ausführungen des Vorschlags vom ${esc(fmtZeit(r.gestartet_am))} stehen schon im Katalog.</p>${startHtml(r)}`
+        : r && r.vorschlag ? vorschlagHtml(r) : `${r ? endeHtml(r) : ""}${startHtml(r)}`);
+      verdrahten();
+      hinweisZeigen();
+    }
+    function verdrahten() {
+      const feld = $("#pd-rs-domains", teil);
+      if (feld) {
+        feld.addEventListener("input", () => { domains = feld.value; });
+        feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#pd-rs-los", teil).click(); } });
+      }
+      ["fotos", "bemerkung"].forEach((k) => { const h = $(`#pd-rs-${k}`, teil); if (h) h.addEventListener("change", () => { haken[k] = h.checked; }); });
+      if ($("#pd-rs-los", teil)) $("#pd-rs-los", teil).onclick = (ev) => starten(ev.currentTarget);
+      if ($("#pd-rs-abbrechen", teil)) $("#pd-rs-abbrechen", teil).onclick = abbrechen;
+      if ($("#pd-rs-verwerfen", teil)) $("#pd-rs-verwerfen", teil).onclick = verwerfen;
+      if ($("#pd-rs-uebernehmen", teil)) $("#pd-rs-uebernehmen", teil).onclick = inFelder;
+      $$('input[name="pd-rs-nr"]', teil).forEach((x) => x.addEventListener("change", () => { nr = +x.value; }));
+      const neuKnopf = $("#pd-rs-neu", teil);
+      if (neuKnopf) {
+        neuKnopf.onclick = () => {
+          neuOffen = !neuOffen;
+          neuKnopf.setAttribute("aria-expanded", String(neuOffen));
+          $("#pd-rs-startteil", teil).hidden = !neuOffen;
+          if (neuOffen) fokus($("#pd-rs-domains", teil));
+        };
+      }
+    }
+    // C3 A: Läuft der Lauf oder ist sein Vorschlag fertig, steht oben im Reiter „Produkt“ ein Satz mit dem Weg hierher.
+    function hinweisZeigen() {
+      const el = $("#pd-rs-hinweis", body);
+      if (!el) return;
+      const r = lauf();
+      const laeuft = rechercheLaeuft(r);
+      if (uebernahme || !(laeuft || anlegbar(r).length)) { el.hidden = true; el.innerHTML = ""; return; }
+      const wer = m ? "Die Recherche zu dieser Meldung" : `Deine Recherche zu „${esc(laufName())}“`;
+      el.innerHTML = `${wer} ${laeuft ? "läuft" : "ist fertig"}. <button type="button" class="lnk" id="pd-rs-zum">${laeuft ? "Zur Recherche" : "Zum Vorschlag"}</button>`;
+      el.hidden = false;
+      $("#pd-rs-zum", el).onclick = () => reiterZeigen("recherche", true);
+    }
+
+    async function laden() {
+      const her = m ? "" : angaben().manufacturer;
+      try { d = await api(url.lesen(her)); geladenFuer = her; } catch (e) { if (!d) toast(e.message, true); }
+    }
+    // Beim Wechsel hierher (B1 A): die Angaben aus dem Reiter „Produkt“ gelten jetzt; hat sich der Hersteller geändert,
+    // kommt der Vorschlag der Herstellerseite neu – eine Eingabe von Hand bleibt stehen.
+    async function zeigen(neuLaden) {
+      startFehler = null;
+      if (neuLaden || !d || (!m && angaben().manufacturer !== geladenFuer)) await laden();
+      if (offen()) { zeichnen(); beobachten(); }
+    }
+
+    async function starten(knopf) {
+      const feld = $("#pd-rs-domains", teil);
+      const liste = feld.value.split(/[\s,;]+/).filter(Boolean);
+      if (!liste.length || liste.length > 3) { S.feldFehler(feld, "Bitte eine bis drei Domains angeben, z. B. hersteller.de."); return; }
+      const x = angaben();
+      knopf.disabled = true;
+      try {
+        const res = await api(url.starten(), { method: "POST", body: m ? { domains: liste, fotos: haken.fotos, bemerkung: haken.bemerkung }
+          : Object.assign({}, x, { domains: liste }) });
+        gestartet = `${x.manufacturer} ${x.model}`.trim();
+        hinweis = res.hinweis || null;
+        startFehler = null; neuOffen = false; nr = null; domains = null;
+        d = Object.assign({}, d, { recherche: res.recherche, moeglich: res.moeglich });
+        // AB2: Der neue Lauf hat die Dateien des alten entfernt – die Übernahme verweist nicht mehr auf ihn. Die
+        // übernommenen Werte bleiben in den Feldern, nur Fundstellen und „Dateien aus der Recherche“ gehen.
+        const warUebernommen = Boolean(uebernahme);
+        if (warUebernommen) { uebernahme = null; fest = null; dateienZeichnen(); produktFeldQuellen(body, {}); }
+        toast(warUebernommen ? "Recherche gestartet. Die Dateien des alten Vorschlags werden nicht mehr angehängt." : "Recherche gestartet");
+        zeichnen();
+        beobachten();
+        const stand = $(".mat-recherche-stand", teil);
+        if (stand) stand.focus({ preventScroll: true });
+      } catch (e) {
+        knopf.disabled = false;
+        if (e.status === 400) {
+          // Ein Feld des Reiters „Produkt“ (Hersteller, Modell …): dorthin, sonst an die Herstellerseite.
+          const ziel = !m && RS_FELD_FEHLER.find(([wort]) => e.message.includes(`„${wort}“`) || e.message.startsWith(`Die ${wort} `));
+          if (ziel && $(`#${ziel[1]}`, body)) { reiterZeigen("produkt"); S.feldFehler($(`#${ziel[1]}`, body), e.message); } else S.feldFehler(feld, e.message);
+        } else if ([409, 429, 503].includes(e.status)) {
+          startFehler = { text: e.message, produkt: e.daten && e.daten.produkt };
+          zeichnen();
+          const neu = $("#pd-rs-los", teil);
+          if (neu) neu.focus();
+        } else S.fehlschlag(knopf, e, body);
+      }
+    }
+    async function abbrechen() {
+      const r = lauf();
+      if (!(await confirm(`Recherche zu „${laufName()}“ abbrechen? Ein Vorschlag entsteht dann nicht; sie zählt trotzdem zum Kontingent.`,
+        "Recherche abbrechen", "Weiterlaufen lassen", { endgueltig: false }))) return;
+      try { await api(url.abbrechen(r), { method: "POST", body: {} }); toast("Recherche wird abgebrochen"); }
+      catch (e) { toast(e.message, true); }
+      if (offen()) { await laden(); zeichnen(); beobachten(); }
+    }
+    async function verwerfen() {
+      const r = lauf();
+      // Ohne Vorschlag (abgebrochen, gescheitert) geht nichts verloren: keine Dateien, keine endgültige Rückfrage (O3).
+      const ja = r.vorschlag
+        ? await confirm(`Vorschlag zu „${laufName()}“ verwerfen? Seine Dateien werden gelöscht; die Recherche zählt weiter zum Kontingent.`, "Verwerfen")
+        : await confirm(`Die ${r.status === "abgebrochen" ? "abgebrochene" : "gescheiterte"} Recherche aus dem Reiter nehmen? Sie zählt weiter zum Kontingent.`,
+          "Aus dem Reiter nehmen", "Abbrechen", { endgueltig: false });
+      if (!ja) return;
+      try {
+        await api(`${API}/recherche/${r.id}/verwerfen`, { method: "POST", body: {} });
+        toast(r.vorschlag ? "Vorschlag verworfen" : "Recherche aus dem Reiter genommen");
+        if (uebernahme && uebernahme.lauf.id === r.id) { uebernahme = null; dateienZeichnen(); }
+      } catch (e) { toast(e.message, true); }
+      if (offen()) { await laden(); zeichnen(); }
+    }
+
+    /* Nachfragen alle 5 s, solange der Lauf läuft, der Dialog offen und die Seite sichtbar ist. Am Ende ein Toast und der
+       Reiter zeichnet sich neu (auch, wenn gerade „Produkt“ zu sehen ist – dann steht oben der Hinweis). */
+    function beobachten() {
+      clearTimeout(nachfrage);
+      nachfrage = null;
+      const r = lauf();
+      if (!rechercheLaeuft(r) || !offen() || document.visibilityState !== "visible") return;
+      nachfrage = setTimeout(async () => {
+        nachfrage = null;
+        if (!offen()) return;
+        let neu;
+        try { neu = await api(url.stand(r)); }
+        catch (e) { if (!e.status) beobachten(); return; }             // ohne Netz: später noch einmal
+        if (!offen()) return;
+        const name = laufName();
+        d = Object.assign({}, d, { recherche: neu.recherche, moeglich: neu.moeglich, start: neu.start || d.start });
+        const jetzt = neu.recherche;
+        if (rechercheLaeuft(jetzt)) {
+          const stand = $(".mat-recherche-stand", teil);
+          if (!stand) zeichnen();
+          else if (stand.textContent !== rechercheStand(jetzt)) stand.textContent = rechercheStand(jetzt);
+          beobachten();
+          return;
+        }
+        toast(jetzt && jetzt.status === "fertig" ? `Recherche zu „${name}“ fertig` : jetzt && jetzt.status === "abgebrochen"
+          ? `Recherche zu „${name}“ abgebrochen` : `Recherche zu „${name}“ gescheitert`, Boolean(jetzt && jetzt.status === "fehlgeschlagen"));
+        zeichnen();
+      }, 5000);
+    }
+    document.addEventListener("visibilitychange", beobachten, { signal: aus.signal });
+
+    // „In die Felder übernehmen“ (3.4): erst die Kategorie mit ihrem change (deren Vorgaben greifen), dann die übrigen
+    // Werte – sie haben Vorrang; danach Materialart → Hilfen (Metall sperrt die Lebensdauer). Nicht vorbelegte Werte
+    // stehen nur als „Nicht vorbelegt (…): …“ unter dem Feld.
+    function inFelder() {
+      const r = lauf(), v = r.vorschlag;
+      // Nach dem Anlegen steht die festgelegte Ausführung selbst im Katalog – sie bleibt übernehmbar (S2).
+      const a = v.ausfuehrungen.find((x) => x.nr === nr && (fest === null ? x.anlegbar : x.nr === fest));
+      if (!a) return;
+      const gesetzt = [], quellen = {};
+      RS_FELDER.forEach((k) => {
+        const f = a.felder[k] || v.gemeinsam[k];
+        const el = $(`#${PRODUKT_FELD_ID[k]}`, body);
+        if (!f || !el) return;
+        if (f.vorbelegt && f.wert !== null && f.wert !== undefined && f.wert !== "") {
+          el.value = String(f.wert);
+          el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+          gesetzt.push(k);
+        }
+        const q = quelleHilfe(f);
+        if (q) quellen[k] = q;
+      });
+      if ($("#pd-mk", body)) $("#pd-mk", body).dispatchEvent(new Event("change"));
+      produktFeldQuellen(body, quellen);
+      uebernahme = { lauf: r, a, felder: gesetzt };
+      dateienZeichnen();
+      reiterZeigen("produkt", true);
+      hinweisZeigen();               // der Hinweis „… ist fertig“ hat sich mit der Übernahme erledigt (O5)
+      toast(`${plural(gesetzt.length, "Feld", "Felder")} übernommen – bitte prüfen`);
+    }
+    // D4 A: „Dateien aus der Recherche“ unter dem Bildfeld – je Dokument der gewählten Ausführung ein Häkchen (Vorwahl
+    // laut Prüfung), nicht angebotene mit Grund und Link; das Bild der Ausführung mit Häkchen, solange kein eigenes Bild
+    // gewählt ist (D5 A). Nach einem Teilfehler stehen die fehlenden Dateien darin (role="alert").
+    function dateienZeichnen() {
+      const platz = $("#pd-rs-dateien", body);
+      if (!platz) return;
+      if (!uebernahme) { platz.innerHTML = ""; return; }
+      const { lauf: r, a } = uebernahme;
+      const v = r.vorschlag;
+      const art = (f) => `${esc(DOKART[f.art] || f.art)}${f.version ? `, ${esc(f.version)}` : ""}`;
+      const dokumente = v.dateien.filter((f) => f.art !== "produktbild");
+      const wahl = dokumente.filter((f) => f.anbieten && (!f.gehoert_zu.length || f.gehoert_zu.includes(a.nr)));
+      const nicht = dokumente.filter((f) => !f.anbieten);
+      const bild = a.bild ? v.dateien.find((f) => f.n === a.bild && f.anbieten) : null;
+      const grund = (f) => f.fehler || (f.pruefung && f.pruefung.passt === "nein" ? `gehört nicht dazu: ${f.pruefung.begruendung || "ohne Begründung"}` : "nicht angeboten");
+      platz.innerHTML = `<fieldset class="mat-variante-doks mat-ue-dateien mat-rs-dateien"><legend>Dateien aus der Recherche</legend>
+        <p class="help">Ausführung ${a.nr}${a.felder.article_no && a.felder.article_no.wert ? ` (${esc(a.felder.article_no.wert)})` : ""} – die gewählten Dateien hängen nach „Anlegen“ am neuen Produkt.</p>
+        ${wahl.map((f) => `<label class="inline"><input type="checkbox" class="pd-rs-datei" value="${f.n}"${f.vorgewaehlt ? " checked" : ""}> ${esc(f.titel)} <span class="muted small">${art(f)}</span></label>`).join("")}
+        ${nicht.map((f) => `<p class="small mat-ue-nicht">${f.url ? fremdLink(f.url, esc(f.titel)) : esc(f.titel)} <span class="muted">(${art(f)})</span> – ${esc(grund(f))}</p>`).join("")}
+        ${!wahl.length && !nicht.length ? '<p class="help">Zu dieser Ausführung hat die Recherche keine Dokumente gefunden.</p>' : ""}
+        ${bild ? `<label class="inline mat-ue-bild"><input type="checkbox" id="pd-rs-bild"${bildWahl.datei ? "" : " checked"}> Bild aus der Recherche übernehmen <img src="${esc(url.datei(r, bild.n))}" alt="" loading="lazy"></label>` : ""}
+        <div class="mat-rs-fehler" role="alert" tabindex="-1"></div></fieldset>`;
+    }
+    // O4: Nach einem Teilfehler steht das Produkt schon – der Satz sagt das, darunter die fehlenden Dateien mit Link; der
+    // Fokus geht auf die Meldung (die Hauptaktion heißt dann „Fehlendes anhängen“, produktDialog).
+    function fehlerZeigen(fehler) {
+      const el = $("#pd-rs-dateien .mat-rs-fehler", body);
+      if (!el) return;
+      el.innerHTML = fehler.length ? `<p>Das Produkt ist angelegt, aber nicht alles hängt dran:</p>
+        <ul class="mat-vs-liste">${fehler.map((f) => { const titel = `<strong>${esc(f.titel || "Datei")}</strong>`; return `<li>${f.url ? fremdLink(f.url, titel) : titel}: ${esc(f.fehler)}</li>`; }).join("")}</ul>` : "";
+    }
+    // Fokus auf die Meldung (kein Eingabefeld – auch am Finger), mittig im Bild: unten klebt die Knopfzeile.
+    function meldungZeigen(el) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "center" });
+    }
+    /* Nach dem Anlegen (produktDialog): die gewählten Dateien an das Produkt – nur nach „In die Felder übernehmen“.
+       Danach ist die Ausführung festgelegt (S2). Lehnt der Server mit 404 oder 409 ab (der Vorschlag wurde inzwischen
+       verworfen oder ersetzt, etwa in einem zweiten Tab), fällt die Übernahme weg und das Anlegen geht mit dem eigenen
+       Bild weiter (AB5): {fehler: [], abgelehnt: Text} – der Dialog bleibt mit dem Satz offen. */
+    async function anhaengen(pid, eigenesBild) {
+      if (!uebernahme) return null;
+      const platz = $("#pd-rs-dateien", body);
+      const bildHaken = $("#pd-rs-bild", platz);
+      let res;
+      try {
+        res = await api(`${API}/recherche/${uebernahme.lauf.id}/anhaengen`, { method: "POST", body: {
+          product_id: pid, nr: uebernahme.a.nr, dateien: $$(".pd-rs-datei:checked", platz).map((c) => +c.value),
+          bild: Boolean(bildHaken && bildHaken.checked && !eigenesBild), felder: uebernahme.felder } });
+      } catch (e) {
+        if (![404, 409].includes(e.status)) throw e;
+        uebernahme = null;
+        fest = null;
+        dateienZeichnen();
+        platz.innerHTML = `<div class="mat-rs-fehler" role="alert" tabindex="-1"><p>Das Produkt ist angelegt, die Dateien aus der Recherche hängen aber nicht dran: ${esc(e.message)}</p></div>`;
+        reiterZeigen("produkt");
+        meldungZeigen($(".mat-rs-fehler", platz));
+        return { fehler: [], abgelehnt: e.message };
+      }
+      fest = uebernahme.a.nr;
+      const a = res.anhaengen;
+      fehlerZeigen(a.fehler);
+      if (a.fehler.length) { reiterZeigen("produkt"); meldungZeigen($(".mat-rs-fehler", platz)); }
+      return a;
+    }
+
+    zeichnen();
+    beobachten();
+    return {
+      zeigen: () => zeigen(false),
+      anhaengen,
+      // D5 A: Ein eigenes Bild gewinnt – das Häkchen „Bild aus der Recherche übernehmen“ geht aus.
+      eigenesBild: () => { const h = $("#pd-rs-bild", body); if (h) h.checked = false; },
+    };
   }
 
   async function meldungenZaehlen(el) {

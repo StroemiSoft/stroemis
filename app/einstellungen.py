@@ -30,7 +30,7 @@ class Feld:
     """
 
     def __init__(self, schluessel, gruppe, titel, art="text", hilfe="", config=None,
-                 wandeln=None, geheim=False, platzhalter="", bereich=None):
+                 wandeln=None, geheim=False, platzhalter="", bereich=None, pruefen=None):
         self.schluessel = schluessel
         self.gruppe = gruppe
         self.titel = titel
@@ -41,6 +41,7 @@ class Feld:
         self.geheim = geheim           # wird nie an den Browser zurückgegeben
         self.platzhalter = platzhalter
         self.bereich = bereich         # bei Zahlen: (kleinster, größter) erlaubter Wert, sonst None
+        self.pruefen = pruefen         # Text → Fehlermeldung oder "" (speichern lehnt dann mit 400 ab)
 
     def wert(self, roh):
         """Den gespeicherten Text in das umrechnen, was die Konfiguration erwartet."""
@@ -95,6 +96,19 @@ def _idna(host):
         return host
 
 
+def _api_schluessel_pruefen(text):
+    """Der Schlüssel der Claude API: ein einziges Wort aus druckbaren Zeichen, wie ihn die Anthropic-Console ausgibt
+    (sk-ant-…). Ein Admin-Schlüssel (sk-ant-admin…) verwaltet die ganze Organisation – der gehört nie in die App."""
+    titel = "„Schlüssel für die Claude API“"
+    if len(text) > 400 or re.search(r"[\s\x00-\x1f\x7f-\x9f]", text):
+        return f"{titel} ist so nicht gültig – ohne Leerzeichen und Zeilenumbrüche einfügen."
+    if text.startswith("sk-ant-admin"):
+        return f"{titel}: Das ist ein Admin-Schlüssel. Hierher gehört ein gewöhnlicher API-Schlüssel eines Arbeitsbereichs."
+    if not text.startswith("sk-ant-"):
+        return f"{titel} beginnt mit „sk-ant-“."
+    return ""
+
+
 FELDER = [
     # --- Seite ------------------------------------------------------------------------------
     Feld("SITE_NAME", "Seite", "Name der Seite",
@@ -142,6 +156,15 @@ FELDER = [
                "Ende. Stand und Probelauf: Materialablage → Übersicht (unten). Nur hier einschalten, nicht in der "
                "Grundeinstellung auf dem Server – die Entwicklungsumgebung übernimmt sie von der Produktion und "
                "verschickte sonst ebenfalls Mails."),
+
+    # Schlüssel der Claude API (Wunsch des Nutzers vom 21.11.2026): wie das Mailkennwort geheim – gespeichert, nie
+    # zurückgegeben. app/ki.py liest ihn selbst je Aufruf (ki.schluessel), nicht aus der Konfiguration.
+    Feld("ANTHROPIC_API_KEY", "Materialablage", "Schlüssel für die Claude API", art="passwort", geheim=True,
+         pruefen=_api_schluessel_pruefen, platzhalter="sk-ant-…",
+         hilfe="Für „Recherchieren lassen“ an Produktmeldungen. Wird nie zurückgegeben; leer lassen behält den "
+               "gespeicherten, „Zurücksetzen“ löscht ihn – dann gilt die Grundeinstellung auf dem Server, falls dort "
+               "einer steht. Gilt sofort, ohne Neustart. Je Umgebung ein eigener Schlüssel aus einem eigenen "
+               "Arbeitsbereich der Anthropic-Console mit Monatslimit – das Limit ist die harte Grenze in Geld."),
 
     # --- E-Mail -----------------------------------------------------------------------------
     Feld("MAIL_FROM", "E-Mail", "Absender",
@@ -386,6 +409,10 @@ def speichern(eingaben, uid):
                 text = str(zahl)       # gespeichert wie angezeigt wie wirksam: „007“ wird „7“
             if f.art == "email" and _adresse(text) is None:
                 raise ValueError(f"„{f.titel}“ braucht eine gültige E-Mail-Adresse (oder bleibt leer).")
+            if f.pruefen and text:
+                fehler = f.pruefen(text)
+                if fehler:
+                    raise ValueError(fehler)
             db.execute(
                 "INSERT INTO einstellungen (schluessel, wert, geaendert_am, geaendert_von) "
                 "VALUES (?,?,?,?) ON CONFLICT(schluessel) DO UPDATE SET "
@@ -408,6 +435,19 @@ def zuruecksetzen(schluessel):
     if f.schluessel in _grundstand:
         current_app.config[f.config] = _grundstand[f.schluessel]
     return True
+
+
+def gespeicherter_wert(schluessel):
+    """Ein einzelner gespeicherter Wert als Text – für einen Baustein, der ihn selbst liest statt aus der Konfiguration
+    (der Schlüssel der Claude API, app/ki.py: so sehen alle Arbeitsprozesse und der Thread eines Laufs denselben Stand,
+    nicht den der letzten Anfrage). Leer ohne gespeicherten Wert, mit EINSTELLUNGEN_AUS und ohne App-Kontext."""
+    if abgeschaltet():
+        return ""
+    try:
+        r = db.query("SELECT wert FROM einstellungen WHERE schluessel = ?", (schluessel,), one=True)
+    except Exception:                  # kein App-Kontext oder die Tabelle gibt es noch nicht
+        return ""
+    return (r["wert"] if r else "") or ""
 
 
 def ist_statisch(pfad=None):
