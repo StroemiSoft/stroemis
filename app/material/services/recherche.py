@@ -8,10 +8,12 @@ ki_laeufe.eingabe_json, der Vorschlag in ergebnis_json.
 
 Ablauf eines Laufs:
   1. Aufruf 1 „Recherche“: Websuche frei zur Identifikation (E2 B, höchstens SUCHEN), Abruf (web_fetch, höchstens
-     ABRUFE) nur von den bestätigten Herstellerdomains, den Domains der Links der Meldung (D3 A) und dem Webarchiv
-     (E5 B). Adaptives Denken, Effort „high“ (A3 A), Ausweichmodell nach einer Ablehnung (fallbacks „default“, A4 A),
-     Zwischenspeicher auf der Anweisung. Das Ergebnis gibt Claude über das eigene Werkzeug „ergebnis_abgeben“ ab (K1
-     Plan B: Die Websuche erzwingt Zitate, Zitate und output_config.format geben 400). Ohne „strict“ – laut Doku
+     ABRUFE) nur von den bestätigten Herstellerdomains und den Domains der Links der Meldung (D3 A). Das Webarchiv
+     (E5 B) liest web_fetch nicht – Anthropic lehnt web.archive.org in allowed_domains mit 400 ab („not accessible to
+     our user agent“, 23.11.2026); Archivadressen von Dokumenten lädt der Server selbst (Schritt 2). Lehnt Anthropic
+     so eine weitere Domain ab, läuft der Aufruf ohne sie neu (_ohne_gesperrte). Adaptives Denken, Effort „high“
+     (A3 A), Ausweichmodell nach einer Ablehnung (fallbacks „default“, A4 A), Zwischenspeicher auf der Anweisung. Das
+     Ergebnis gibt Claude über das eigene Werkzeug „ergebnis_abgeben“ ab (K1 Plan B: Die Websuche erzwingt Zitate, Zitate und output_config.format geben 400). Ohne „strict“ – laut Doku
      vertragen sich Structured Outputs und Zitate nicht –, deshalb prüft ergebnis_pruefen die Eingabe selbst; bei einem
      Verstoß geht die Fehlerliste als is_error zurück (höchstens SCHEMA_VERSUCHE mal). Endet Claude ohne Aufruf, fragt
      der Lauf einmal nach.
@@ -138,9 +140,10 @@ Herstellerquellen und immer mit Fundstelle.
 So gehst du vor:
 1. Identifiziere das Produkt. Die Websuche ist frei; Seiten von Händlern und anderen Dritten dienen nur der \
 Identifikation, Werte daraus haben die Beleg-Art nur_identifikation.
-2. Lies die Produktseite des Herstellers mit web_fetch. Abrufbar sind nur die bestätigten Herstellerdomains, die \
-Domains der Links aus der Meldung und das Webarchiv (web.archive.org) – das Webarchiv nur, wenn der Hersteller selbst \
-nichts (mehr) hat, und nur für Adressen auf den Herstellerdomains.
+2. Lies die Produktseite des Herstellers mit web_fetch. Abrufbar sind nur die bestätigten Herstellerdomains und die \
+Domains der Links aus der Meldung. Das Webarchiv (web.archive.org) kann web_fetch nicht lesen: Hat der Hersteller ein \
+Dokument nicht mehr, darfst du seine Archivadresse nennen (https://web.archive.org/web/<Zeitstempel>/<Adresse auf \
+einer Herstellerdomain>) – der Server lädt sie selbst.
 3. Erfasse jede aktuelle Ausführung mit eigener Herstellerartikelnummer (Größen, Farben, Verschlussarten …), \
 höchstens {MAX_AUSFUEHRUNGEN}; weitere nennst du als Hinweis. Keine anderen Modelle.
 4. Nenne die Dokumente – Gebrauchsanleitung, Konformitätserklärung (deutsche Fassung, wenn es sie gibt), \
@@ -533,12 +536,11 @@ def eingabe_bauen(m, domains, fotos, bemerkung, herkunft="meldung"):
         x = _link_ohne_abfrage(x)
         if x not in links:
             links.append(x)
-    abruf = list(domains)
+    abruf = list(domains)                       # ohne Webarchiv – das lehnt Anthropic für web_fetch ab
     for x in links:
         d = netz.domain_lesen(_host(x))
         if d and d not in abruf:
             abruf.append(d)
-    abruf.append(netz.ARCHIV)
     return {
         "meldung": {"hersteller": m["manufacturer"], "modell": m["model"], "artikelnummer": m["article_no"] or "",
                     "norm": m["norm"] or "", "kategorie": kat, "links": links,
@@ -696,6 +698,10 @@ def _nachricht(lauf):
             else ["- Bemerkung des Melders:", m["bemerkung"]]
     zeilen += ["", "Bestätigte Herstellerdomains (Werte und Dateien nur von dort bzw. aus ihren Archivständen):"]
     zeilen += [f"- {d} (Startseite https://{d}/)" for d in e["domains"]]
+    if e.get("abruf_gesperrt"):
+        zeilen += ["", "Diese Domains darf web_fetch nicht abrufen (von Anthropic gesperrt): "
+                   + ", ".join(e["abruf_gesperrt"]) + ". Von dort kennst du nur Suchtreffer; Dokumente und Bilder "
+                   "nennst du trotzdem mit Adresse – der Server lädt sie selbst."]
     k = e["katalog"]
     zeilen += ["", "Kategorien im Katalog (Kennung: Pfad) – kategorie_id nur aus dieser Liste:"]
     zeilen += [f"{x['id']}: {x['pfad']}" for x in k["kategorien"]] or ["(keine)"]
@@ -733,17 +739,35 @@ def _foto_block(datei):
 
 
 def _anfrage_recherche(lauf):
+    abruf = lauf.eingabe["abruf_domains"]
+    # Ohne abrufbare Domain (alle von Anthropic gesperrt, _ohne_gesperrte) ganz ohne web_fetch.
+    holen = [{"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": ABRUFE, "allowed_domains": abruf}] \
+        if abruf else []
     return {
         "model": ki.MODELL, "max_tokens": MAX_TOKENS, "betas": BETAS, "fallbacks": "default",
         "thinking": {"type": "adaptive"}, "output_config": {"effort": EFFORT},
         "cache_control": {"type": "ephemeral"},
         "system": [{"type": "text", "text": system_recherche(), "cache_control": {"type": "ephemeral"}}],
-        "tools": [{"type": "web_search_20260209", "name": "web_search", "max_uses": SUCHEN},
-                  {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": ABRUFE,
-                   "allowed_domains": lauf.eingabe["abruf_domains"]},
-                  WERKZEUG],
+        "tools": [{"type": "web_search_20260209", "name": "web_search", "max_uses": SUCHEN}, *holen, WERKZEUG],
         "messages": [{"role": "user", "content": _nachricht(lauf)}],
     }
+
+
+def _ohne_gesperrte(lauf, exc, anfrage):
+    """Lehnt Anthropic schon die erste Anfrage ab, weil web_fetch eine Domain aus allowed_domains nicht abrufen darf
+    (400 „not accessible to our user agent“): die Domains aus der Eingabe nehmen, als abruf_gesperrt vermerken und
+    True – der Aufruf läuft dann ohne sie neu. Sonst False (die Ausnahme gilt). Jeder Neuversuch hat weniger Domains,
+    die Schleife endet also; eine 400 kostet nichts."""
+    e = lauf.eingabe
+    gesperrt = [d for d in ki.gesperrte_domains(exc) if d in e["abruf_domains"]]
+    if not gesperrt or len(anfrage["messages"]) > 1:
+        return False
+    current_app.logger.warning("KI-Lauf %s: Anthropic darf %s nicht abrufen – erneut ohne", lauf.id,
+                               ", ".join(gesperrt))
+    e["abruf_gesperrt"] = sorted(set(e.get("abruf_gesperrt") or []) | set(gesperrt))
+    e["abruf_domains"] = [d for d in e["abruf_domains"] if d not in gesperrt]
+    lauf.eingabe_speichern()
+    return True
 
 
 def _recherche(lauf):
@@ -764,8 +788,14 @@ def _recherche(lauf):
             raise ki.LaufFehler("Das Ergebnis entsprach auch nach zwei Korrekturen nicht dem Schema.")
         return ki.Antwort(json.dumps({"fehler": fehler[:40]}, ensure_ascii=False), fehler=True)
 
-    anfrage = _anfrage_recherche(lauf)
-    lauf.gespraech(anfrage, {"ergebnis_abgeben": abgeben}, nachfrage=NACHFRAGE)
+    while True:
+        anfrage = _anfrage_recherche(lauf)
+        try:
+            lauf.gespraech(anfrage, {"ergebnis_abgeben": abgeben}, nachfrage=NACHFRAGE)
+            break
+        except Exception as exc:                    # noqa: BLE001 – nur die eine Ablehnung, sonst weiter nach oben
+            if not _ohne_gesperrte(lauf, exc, anfrage):
+                raise
     if stand["ergebnis"] is None:
         raise ki.LaufFehler("Claude hat kein Ergebnis abgegeben.")
     # Welche Seiten Claude wirklich gelesen hat – nur deren Werte können „hersteller“ bzw. „webarchiv“ sein.
@@ -1282,6 +1312,9 @@ def zusammenfuehren(ergebnis, dateien, eingabe, usage=()):
     aus_angaben = "aus dem Formular" if formular else "aus der Meldung"
     gem = ergebnis["gemeinsam"]
     hinweise = list(ergebnis["hinweise"])
+    if eingabe.get("abruf_gesperrt"):
+        hinweise.append("Anthropic sperrt den Abruf von " + ", ".join(eingabe["abruf_gesperrt"]) + " – Claude kannte "
+                        "von dort nur Suchtreffer; die Dokumente lädt der Server selbst.")
     if gem["nicht_mehr_im_angebot"]:
         hinweise.append("nicht mehr im Herstellerangebot" + (f" – Nachfolger: {gem['nachfolger']}"
                                                               if gem["nachfolger"] else ""))
@@ -1460,7 +1493,8 @@ def status_json(z, voll=False):
                            and je_id[e["product_id"]]["created_at"] <= (e.get("am") or ue.get("am") or "")]
     if voll:
         e = ki.json_lesen(z["eingabe_json"], {}) or {}
-        out["eingabe"] = {k: e[k] for k in ("meldung", "domains", "abruf_domains", "bemerkung") if k in e}
+        out["eingabe"] = {k: e[k] for k in ("meldung", "domains", "abruf_domains", "abruf_gesperrt", "bemerkung")
+                          if k in e}
         out["eingabe"]["fotos"] = len(e.get("fotos") or [])
         out["eingabe"]["herkunft"] = e.get("herkunft") or ("katalog" if z["bezug"] == BEZUG_KATALOG else "meldung")
         erg = erg if erg is not None else ki.json_lesen(z["ergebnis_json"], {}) or {}

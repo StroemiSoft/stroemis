@@ -751,7 +751,7 @@ def test_echter_client_und_fehlerkette():
                               system=[{"type": "text", "text": "Anweisung", "cache_control": {"type": "ephemeral"}}],
                               tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 8},
                                      {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 12,
-                                      "allowed_domains": ["hersteller.test", "web.archive.org"]},
+                                      "allowed_domains": ["hersteller.test"]},
                                      {"name": "eins", "description": "Probe", "eager_input_streaming": True,
                                       "input_schema": {"type": "object"}}])
                 z = lauf_starten(gespraech_arbeit(anf, {"eins": lambda e: ki.Antwort(f"gesehen {e['x']}")}))

@@ -148,7 +148,7 @@ def test_start_ohne_meldung():
                 and eingabe["bemerkung"] is True and eingabe["meldung"]["bemerkung"] == "Gr. M/L" \
                 and eingabe["meldung"]["links"] == [] and eingabe["fotos"] == [] \
                 and eingabe["meldung"]["kategorie"]["id"] == ids["gurte"], eingabe
-            assert eingabe["abruf_domains"] == ["hersteller.test", "web.archive.org"], eingabe["abruf_domains"]
+            assert eingabe["abruf_domains"] == ["hersteller.test"], eingabe["abruf_domains"]
             gesendet = json.dumps(a.anfragen[0]["messages"], ensure_ascii=False, default=str)
             for nie in ("katalog@example.org", "wart@example.org", "OG Musterstadt", "Max Platzhalter", "Gehört"):
                 assert nie not in gesendet, nie
