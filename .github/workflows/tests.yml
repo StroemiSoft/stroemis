@@ -58,10 +58,19 @@ jobs:
       # PDF/A-Prüfung der Protokolle und Berichte wie auf dem Entwicklungsrechner (dort st-vera): veraPDF mit fester
       # Version aus Maven Central (tests/verapdf/pom.xml), mit Java und Maven des Runners. VERAPDF nennt den Tests den
       # Aufruf (tests/test_material.py, pdfa_pruefer); startet veraPDF nicht, scheitert schon dieser Schritt.
+      # Das Plugin steht mit Gruppe und fester Version da: Das Kürzel „dependency:“ musste Maven erst über die
+      # Verzeichnisse von Maven Central auflösen, und daran scheiterte der Schritt ab und zu („No plugin found for
+      # prefix 'dependency'“). Gegen kurze Aussetzer beim Herunterladen höchstens drei Versuche.
       - name: veraPDF für die PDF/A-Prüfung
         run: |
-          mvn -B -q -f tests/verapdf/pom.xml dependency:copy-dependencies \
-            -DoutputDirectory="$RUNNER_TEMP/verapdf" -DincludeScope=runtime
+          for versuch in 1 2 3; do
+            mvn -B -q -f tests/verapdf/pom.xml \
+              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:copy-dependencies \
+              -DoutputDirectory="$RUNNER_TEMP/verapdf" -DincludeScope=runtime && break
+            [ "$versuch" = 3 ] && exit 1
+            echo "::warning title=veraPDF::Herunterladen im Versuch $versuch gescheitert, neuer Versuch in 20 s"
+            sleep 20
+          done
           echo "VERAPDF=java -cp $RUNNER_TEMP/verapdf/* org.verapdf.apps.GreenfieldCliWrapper" >> "$GITHUB_ENV"
           java -cp "$RUNNER_TEMP/verapdf/*" org.verapdf.apps.GreenfieldCliWrapper --version
 

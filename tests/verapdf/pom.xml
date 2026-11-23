@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Nur für die Tests: veraPDF (PDF/A-Prüfung der Protokolle und Berichte) aus Maven Central, mit fester Version.
      Der Workflow „Tests“ (Schritt „veraPDF für die PDF/A-Prüfung“) holt es samt Abhängigkeiten mit
-     dependency:copy-dependencies in einen Ordner und gibt den Tests den Aufruf in VERAPDF:
+     maven-dependency-plugin:3.11.0:copy-dependencies (volle Koordinaten, siehe dort) in einen Ordner und gibt den
+     Tests den Aufruf in VERAPDF:
      java -cp "<ordner>/*" org.verapdf.apps.GreenfieldCliWrapper – siehe tests/test_material.py, pdfa_pruefer.
      Zum Heben: version ändern. -->
 <project xmlns="http://maven.apache.org/POM/4.0.0">
