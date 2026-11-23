@@ -798,6 +798,57 @@ def test_echter_client_und_fehlerkette():
                         ki.CLIENT = alt
                     assert z["status"] == "fehlgeschlagen" and teil in z["fehler"], (status, dict(z))
                     assert SCHLUESSEL not in z["fehler"] and "sk-ant" not in z["fehler"], z["fehler"]
+                    # Nur bei 400 steht der Anfang der Meldung in der Anzeige (seit dem 23.11.2026) – ohne Schlüssel.
+                    if status == 400:
+                        assert z["fehler"] == "Die Schnittstelle hat die Anfrage abgelehnt: „Fehler mit ***“ (mehr " \
+                                              "im Protokoll des Servers).", z["fehler"]
+                    else:
+                        assert "Fehler mit" not in z["fehler"], (status, z["fehler"])
+
+                # Die Meldung einer 400 in der Anzeige: nur error.message aus dem Rumpf, eine Zeile, ohne Steuerzeichen,
+                # ohne Schlüssel (auch keinen fremden), gekürzt erst nach dem Unkenntlichmachen. Ohne lesbare Meldung
+                # bleibt der allgemeine Satz – nie die Rohantwort.
+                import anthropic
+
+                def abgelehnt(rumpf=None, text=None):
+                    def antwort_400(_r):
+                        if text is not None:
+                            return httpx2.Response(400, headers={"request-id": "req_fehler"}, text=text)
+                        return httpx2.Response(400, headers={"request-id": "req_fehler"}, json=rumpf)
+                    client = _echter_client(antwort_400, [])
+                    try:
+                        with client.beta.messages.stream(model="claude-opus-5-5", max_tokens=10,
+                                                         messages=[{"role": "user", "content": "x"}]) as s:
+                            s.get_final_message()
+                    except anthropic.BadRequestError as exc:
+                        return ki.fehlertext(exc, 0)
+                    raise AssertionError("Die Attrappe hat keine 400 geliefert.")
+
+                def mit(meldung):
+                    return abgelehnt({"type": "error", "error": {"type": "invalid_request_error", "message": meldung}})
+
+                def gezeigt(satz):
+                    anfang, ende = "Die Schnittstelle hat die Anfrage abgelehnt: „", "“ (mehr im Protokoll des Servers)."
+                    assert satz.startswith(anfang) and satz.endswith(ende), satz
+                    return satz[len(anfang):-len(ende)]
+                allgemein = "Die Schnittstelle hat die Anfrage abgelehnt – Einzelheiten stehen im Protokoll des Servers."
+                guthaben = "Your credit balance is too low to access the Anthropic API."
+                assert gezeigt(mit(guthaben)) == guthaben
+                lang = gezeigt(mit("tools.1.allowed_domains: " + "x" * 500))
+                assert len(lang) == ki.MELDUNG_ZEICHEN and lang.endswith("…") and lang.startswith("tools.1."), lang
+                zeile = gezeigt(mit("Zeile 1\r\n  Zeile 2\tEnde\x00\x1b[31m rot neu"))
+                assert zeile == "Zeile 1 Zeile 2 Ende [31m rot neu" and all(z.isprintable() for z in zeile), repr(zeile)
+                assert gezeigt(mit("Schlüssel sk-ant-api03-FREMD_abc-123 und noch einer")) == \
+                    "Schlüssel *** und noch einer"
+                # Der Schlüssel läge genau auf der Schnittkante: erst unkenntlich machen, dann kürzen.
+                kante = gezeigt(mit("a" * (ki.MELDUNG_ZEICHEN - 20) + " " + SCHLUESSEL + " danach"))
+                assert "sk-ant" not in kante and "geheim" not in kante and kante.endswith("*** danach"), kante
+                for ohne in ({"type": "error", "error": {"type": "invalid_request_error"}},
+                             {"type": "error", "error": {"type": "x", "message": {"verschachtelt": SCHLUESSEL}}},
+                             {"type": "error", "error": {"type": "x", "message": ""}},
+                             {"type": "error", "error": "nur Text"}, {"irgendwas": 1}, ["Liste"]):
+                    assert abgelehnt(ohne) == allgemein, ohne
+                assert abgelehnt(text=f"<html>Proxy sagt nein zu {SCHLUESSEL}</html>") == allgemein
             finally:
                 logging.getLogger("app.ki").removeHandler(fang)
             assert protokolliert and not any(SCHLUESSEL in p for p in protokolliert), protokolliert
