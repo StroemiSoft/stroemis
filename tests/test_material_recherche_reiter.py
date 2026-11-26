@@ -898,7 +898,13 @@ def test_oberflaeche_statisch():
     with open(os.path.join(wurzel, "app", "material", "static", "material.css"), encoding="utf-8") as fh:
         css = fh.read()
     pd = _quelle(js, "async function produktDialog(p, opt)", "\n  }\n")
-    assert "const mitRecherche = mitReiter && Boolean(DARF.recherche) && !p.id && !p.variante_von;" in pd
+    # Seit dem 26.11.2026 auch in der Nacharbeit (opt.danach, Variante A2 B): dort nur „Produkt“ und „Recherche“.
+    assert "const mitBestandteile = !opt.danach;" in pd
+    assert "const mitRecherche = Boolean(DARF.recherche) && !p.id && !p.variante_von;" in pd
+    assert "const mitReiter = mitBestandteile || mitRecherche;" in pd
+    assert '${mitBestandteile ? `\n        <button type="button" role="tab" id="pd-reiter-bestandteile"' in pd
+    assert "const stueck = mitBestandteile ? stuecklisteEditor(" in pd and "if (mitBestandteile) {" in pd
+    assert "if (mitBestandteile) stueck.gespeichert();" in pd and "mitBestandteile && p.id && stueck.geaendert()" in pd
     assert 'data-reiter="recherche">Recherche</button>' in pd and 'id="pd-teil-recherche"' in pd
     # Reihenfolge der Reiter: Produkt | Bestandteile | Recherche.
     assert pd.index('data-reiter="produkt"') < pd.index('data-reiter="bestandteile"') < pd.index('data-reiter="recherche"')

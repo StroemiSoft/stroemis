@@ -4954,12 +4954,16 @@
   async function produktDialog(p, opt) {
     opt = opt || {};
     const neu = !p.id;
-    const mitReiter = !opt.danach;
-    /* Der dritte Reiter „Recherche“ (22.11.2026, rechercheReiter): nur für die Material-Verwaltung mit API-Schlüssel
+    const mitBestandteile = !opt.danach;
+    /* Der Reiter „Recherche“ (22.11.2026, rechercheReiter): nur für die Material-Verwaltung mit API-Schlüssel
        (DARF.recherche – in der Übung fehlt das Feld) und nur, wenn ein Produkt neu in den Katalog kommt: „Produkt
-       anlegen“ und „Produkt aus Meldung anlegen“ (A1 A), nicht bei Bearbeiten, Variante und Nacharbeit (A2 A). Der Stand
-       der Recherche kommt gleich mit den Kategorien, damit der Hinweis im Reiter „Produkt“ ohne Sprung dasteht. */
-    const mitRecherche = mitReiter && Boolean(DARF.recherche) && !p.id && !p.variante_von;
+       anlegen“ und „Produkt aus Meldung anlegen“ (A1 A), seit dem 26.11.2026 auch „Im Katalog anlegen“ in der Nacharbeit
+       eines Bestandsimports (Wunsch des Nutzers, Variante A2 B des Entwurfs: dort nur „Produkt“ und „Recherche“, ohne
+       „Bestandteile“; nach dem Anlegen hängen die Dateien an, dann ordnet danach() zu). Nicht bei Bearbeiten und
+       Variante. Der Stand der Recherche kommt gleich mit den Kategorien, damit der Hinweis im Reiter „Produkt“ ohne
+       Sprung dasteht. Ohne Schlüssel bleibt die Nacharbeit ohne Reiter. */
+    const mitRecherche = Boolean(DARF.recherche) && !p.id && !p.variante_von;
+    const mitReiter = mitBestandteile || mitRecherche;
     const [kats, rsStand] = await Promise.all([kategorienLaden(), mitRecherche ? rechercheStandLaden(p) : null]);
     // Als Variante: die aktuellen Dokumente des Vorbilds (neueste Version, nicht zurückgezogen) zur Auswahl.
     const vorbildDoks = p.variante_von ? p.variante_von.dokumente.filter((d) => !d.abgeloest_durch && (!d.withdrawn_on || d.withdrawn_on > isoHeute(0))) : [];
@@ -4967,7 +4971,7 @@
        Anzahl, stuecklisteEditor; leer erlaubt). Beim Wechsel geht nichts verloren. Neu angelegt (auch als Variante und
        aus einer Meldung) geht die Liste in derselben Anfrage mit – scheitert eine Position, entsteht nichts und die
        Position ist markiert; beim Bearbeiten erst das Produkt, dann die Liste als Ganzes (PUT …/bestandteile), wenn sie
-       sich geändert hat. Nicht in der Nacharbeit (opt.danach). */
+       sich geändert hat. Nicht in der Nacharbeit (opt.danach, mitBestandteile). */
     const formular = `${mitRecherche ? '<p class="notice mat-rs-hinweis" id="pd-rs-hinweis" hidden></p>' : ""}
       ${p.variante_von ? `<p class="help">Die Stammdaten sind übernommen – bitte die neue Artikelnummer eintragen und anpassen, was sich unterscheidet.${(p.bestandteile || []).length ? " Die Bestandteile stehen im Reiter „Bestandteile“." : ""}</p>` : ""}
       ${p.meldung ? meldeKasten(p.meldung) : ""}
@@ -4984,11 +4988,11 @@
       : p.meldung ? "Produkt aus Meldung anlegen" : neu ? "Produkt anlegen" : "Produkt bearbeiten";
     dialog(mitReiter ? `<h2 id="pd-titel">${titel}</h2>
       <div class="c-tabs reiter-linie mat-reiter" role="tablist" aria-labelledby="pd-titel">
-        <button type="button" role="tab" id="pd-reiter-produkt" aria-controls="pd-teil-produkt" data-reiter="produkt">Produkt</button>
-        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button>${mitRecherche ? `
+        <button type="button" role="tab" id="pd-reiter-produkt" aria-controls="pd-teil-produkt" data-reiter="produkt">Produkt</button>${mitBestandteile ? `
+        <button type="button" role="tab" id="pd-reiter-bestandteile" aria-controls="pd-teil-bestandteile" data-reiter="bestandteile">Bestandteile</button>` : ""}${mitRecherche ? `
         <button type="button" role="tab" id="pd-reiter-recherche" aria-controls="pd-teil-recherche" data-reiter="recherche">Recherche</button>` : ""}</div>
-      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-produkt" aria-labelledby="pd-reiter-produkt">${formular}</div>
-      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>${mitRecherche ? `
+      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-produkt" aria-labelledby="pd-reiter-produkt">${formular}</div>${mitBestandteile ? `
+      <div class="mat-reiter-teil" role="tabpanel" id="pd-teil-bestandteile" aria-labelledby="pd-reiter-bestandteile" hidden></div>` : ""}${mitRecherche ? `
       <div class="mat-reiter-teil mat-rs-vorschlag" role="tabpanel" id="pd-teil-recherche" aria-labelledby="pd-reiter-recherche" hidden></div>` : ""}
       <div class="dlg-actions"><button class="btn secondary" data-close type="button">Abbrechen</button><button class="btn" id="pd-ok" type="button">${neu ? "Anlegen" : "Speichern"}</button></div>`
       : `<h2>${titel}</h2>${formular}
@@ -5002,8 +5006,8 @@
       // Die Bestandteil-Liste und die Reiter (Start „Produkt“, „Bestandteile bearbeiten“ öffnet „Bestandteile“); die
       // Variante übernimmt die Liste des Vorbilds zum Bearbeiten. Der Reiter „Recherche“ liest bei jedem Wechsel dorthin
       // die Felder des Reiters „Produkt“.
-      const stueck = mitReiter ? stuecklisteEditor($("#pd-teil-bestandteile", body), p) : null;
-      const reiterZeigen = mitReiter ? reiterSchalten(body, opt.reiter === "bestandteile" ? "bestandteile" : "produkt",
+      const stueck = mitBestandteile ? stuecklisteEditor($("#pd-teil-bestandteile", body), p) : null;
+      const reiterZeigen = mitReiter ? reiterSchalten(body, mitBestandteile && opt.reiter === "bestandteile" ? "bestandteile" : "produkt",
         (name) => { if (rs && name === "recherche") rs.zeigen(); }) : null;
       if (mitRecherche) rs = rechercheReiter({ dlg, body, p, kats, felder, reiterZeigen, bildWahl, stand: rsStand });
       // Erst die Angaben (ein neues Produkt samt Bestandteil-Liste), dann das Bild. Scheitert nur das Bild, kennt der
@@ -5021,7 +5025,7 @@
         if (p.variante_von && !pid && !daten.article_no.trim()) { toast("Eine Variante braucht eine eigene Artikelnummer.", true); fokus($("#pd-art", body)); return; }
         const laenge = daten.description.replace(/\s+/g, " ").trim().length;
         if (laenge > BESCHREIBUNG_MAX) { toast(`Die Bemerkung ist ein kurzer Zusatz hinter dem Namen – höchstens ${BESCHREIBUNG_MAX} Zeichen, hier sind es ${laenge}. Bitte kürzen.`, true); fokus($("#pd-desc", body)); return; }
-        if (mitReiter) {
+        if (mitBestandteile) {
           const fehler = stueck.pruefen();
           if (fehler) { reiterZeigen("bestandteile"); toast(fehler, true); return; }
           // Neu (auch Variante und aus Meldung): Produkt und Bestandteil-Liste in einer Anfrage – die Liste nur, wenn sie
@@ -5039,15 +5043,15 @@
               : await api(`${API}/produkte`, { method: "POST", body: daten });
           } catch (e) {
             // „Position n: …“ beim Anlegen: an die Position, in den Reiter „Bestandteile“.
-            if (mitReiter && !pid && /^Position \d+: |Positionen je Liste/.test(e.message)) { stueck.fehlerZeigen(e.message); reiterZeigen("bestandteile"); }
+            if (mitBestandteile && !pid && /^Position \d+: |Positionen je Liste/.test(e.message)) { stueck.fehlerZeigen(e.message); reiterZeigen("bestandteile"); }
             throw e;
           }
           pid = r.produkt.id;
-          if (mitReiter && p.id && stueck.geaendert()) {
+          if (mitBestandteile && p.id && stueck.geaendert()) {
             try { r = await api(`${API}/produkte/${pid}/bestandteile`, { method: "PUT", body: { bestandteile: stueck.liste() } }); }
             catch (e) { stueck.fehlerZeigen(e.message); reiterZeigen("bestandteile"); throw e; }
           }
-          if (mitReiter) stueck.gespeichert();
+          if (mitBestandteile) stueck.gespeichert();
           const anhang = rs ? await rs.anhaengen(pid, Boolean(bild)) : null;
           if (bild && !bildHoch) {
             const fd = new FormData();
