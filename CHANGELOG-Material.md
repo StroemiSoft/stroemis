@@ -14601,3 +14601,26 @@ Entschieden hat der Nutzer „Titel + Baum grau“ und „Vorlagen ausnehmen“.
 **Tests:** neu `test_wiki_entwurf.py` (Chromium, echte App: Einzelfreigabe, Abschnitt mit Unterseiten über zwei
 Ebenen, Unterseite einer Einzelfreigabe, lesebeschränkte Seite, Vorlage; Wiki-Verwaltung und Mitglied; Freigeben über
 „Teilen“); angepasst `test_wiki_seitenbaum.py` (Markup der Baumzeile).
+
+## Recherche per Claude API auch in der Nacharbeit: „Im Katalog anlegen“ (Wunsch, 26.11.2026)
+
+Nutzer: „Füge die KI-Recherche noch bei der Nacharbeit von Importen als Material-Verwaltung ein, bei ‚In Katalog
+aufnehmen‘“. Am 22.11.2026 war die Nacharbeit bewusst ohne Reiter geblieben (Entscheidung A2 A in
+`entwurf_recherche_reiter_produkt.md`). Jetzt gilt dort Variante A2 B.
+
+- **Dialog „Im Katalog anlegen“** (Nacharbeit eines Bestandsimports, nur Material-Verwaltung): Mit API-Schlüssel
+  (`darf.recherche`) hat er die Reiter „Produkt“ und „Recherche“, ohne „Bestandteile“. Vorbelegt sind wie bisher
+  Hersteller, Modell und Artikelnummer der Angabe. Daraus recherchiert der Reiter, wie in „Produkt anlegen“: Lauf ohne
+  Meldung (`mat_katalog`), jüngster eigener Lauf, Kontingent, „In die Felder übernehmen“, „Dateien aus der Recherche“.
+- **Nach „Anlegen“:** erst das Produkt, dann die gewählten Dateien und das Bild aus der Recherche (`anhaengen`), dann
+  ordnet die Nacharbeit das Produkt der Angabe zu und öffnet die Prüfung „Zugeordnet – übernehmen?“ wie bisher. Fehlt
+  eine Datei, bleibt der Dialog wie überall mit „Fehlendes anhängen“ offen. Zugeordnet wird erst, wenn alles hängt.
+- **Ohne Schlüssel** und in der Übung bleibt der Dialog ohne Reiter wie bisher. Bearbeiten und Variante bleiben ohne
+  Recherche. Der Server ist unverändert: Die Routen der Recherche ohne Meldung gibt es schon. In `produktDialog` steht
+  `mitBestandteile` (bisher `mitReiter`) für den Reiter „Bestandteile“. `mitReiter` heißt jetzt nur noch: Der Dialog
+  hat Reiter.
+
+**Tests:** neu `test_material_nacharbeit_recherche.py` (Chromium, echte App, Attrappe statt Claude API, Dateien vom
+lokalen HTTPS-Server: Nacharbeit → „Im Katalog anlegen“ → Recherche → „In die Felder übernehmen“ → „Anlegen“; Produkt
+mit Kategorie und Dateien, Zeile zugeordnet, Lauf „übernommen“; ohne Schlüssel keine Reiter); angepasst
+`test_material_recherche_reiter.py` (statische Bedingungen).
