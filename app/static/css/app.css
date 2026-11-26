@@ -1162,6 +1162,10 @@ progress { width: 100%; height: 10px; accent-color: var(--rot); }
 .toc-list .l4 a { padding-left: 48px; font-size: var(--fs-marke); }
 .seitentitel .pubbadge { background: var(--grau-hell); color: var(--anthrazit); }
 .tree .pub { font-size: .75em; }
+/* Entwürfe (nicht veröffentlichte Seiten, istEntwurf in wiki.js; Wunsch vom 26.11.2026) stehen im Baum grau – auch
+   oben, wo die Zeile sonst schwarz ist, und als offene Seite. Grau auf dem Hellgrau der Leiste 4,7 : 1, auf Weiß 5,2 : 1
+   (AA). Das Wort „Entwurf“ steht im Tooltip und für Vorlesehilfen in der Zeile, die Marke am Seitentitel. */
+.tree .baum-titel.entwurf { color: var(--grau); }
 
 /* Kommentare */
 .comment { border-left: 3px solid var(--linie); padding: 6px 10px; margin: 8px 0; background: var(--weiss); overflow-wrap: break-word; }

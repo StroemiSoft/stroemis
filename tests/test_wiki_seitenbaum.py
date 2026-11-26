@@ -69,9 +69,13 @@ def test_klappknopf_markup():
     assert '`aria-label="${esc(p.title)} ${collapsed ? "aufklappen" : "zuklappen"}" aria-expanded="${!collapsed}"`' in zweig
     assert ": 'aria-hidden=\"true\" tabindex=\"-1\"';" in zweig
     # Titel in eigener Spanne (Ellipse bzw. hängender Umbruch), Symbol davor, Zusätze darin; Text immer mit esc.
-    assert ('<span class="baum-titel">${esc(p.title)}${p.is_public ? \' <span class="pub" title="für alle Angemeldeten freigegeben">🌐</span>\' : ""}'
+    # Entwürfe (Wunsch vom 26.11.2026): Titel grau, „(Entwurf)“ für Vorlesehilfen, „ – Entwurf“ im Tooltip.
+    assert ('<span class="baum-titel${entwurf ? " entwurf" : ""}">${esc(p.title)}'
+            '${entwurf ? \'<span class="nur-vorlesen"> (Entwurf)</span>\' : ""}'
+            '${p.is_public ? \' <span class="pub" title="für alle Angemeldeten freigegeben">🌐</span>\' : ""}'
             '${p.favorite ? \' <span class="fav" title="auf der Merkliste">★</span>\' : ""}</span></a>') in zweig
-    assert 'title="${esc(p.title)}"' in zweig
+    assert 'title="${esc(p.title)}${entwurf ? " – Entwurf" : ""}"' in zweig
+    assert "const entwurf = istEntwurf(p);" in zweig
     # Aufklappen schreibt Zustand und Namen nach.
     baum = js[js.index("function renderTree()"):js.index("function baumMenu(anchor)")]
     assert 'b.setAttribute("aria-expanded", String(!zu));' in baum

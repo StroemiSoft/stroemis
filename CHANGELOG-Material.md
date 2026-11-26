@@ -14579,3 +14579,25 @@ abgeschaltete Websuche oder ein Parameterfehler sein.
 **Tests:** `test_ki.py` (`test_echter_client_und_fehlerkette`: Meldung nur bei 400; Kürzung, eine Zeile,
 Steuerzeichen, fremder Schlüssel, Schlüssel auf der Schnittkante, Antworten ohne lesbare Meldung);
 `test_material_recherche.py` (`test_von_anthropic_gesperrte_domains`: der Satz am Lauf und im Stand der Meldung).
+
+## Strömipedia: nicht veröffentlichte Seiten als Entwurf gekennzeichnet (Wunsch, 26.11.2026)
+
+Nutzer: „Alle Artikel in der Strömipedia, die nicht veröffentlicht sind, sollen als Entwurf gekennzeichnet werden“.
+Veröffentlicht heißt für alle Angemeldeten freigegeben, entweder die Seite selbst oder ein Abschnitt darüber samt
+Unterseiten. Bisher trugen nur diese Seiten eine Marke („für alle Angemeldeten“, im Baum 🌐), die übrigen gar keine.
+Entschieden hat der Nutzer „Titel + Baum grau“ und „Vorlagen ausnehmen“.
+
+- **Seitentitel:** Ein Entwurf trägt neben dem Titel die graue Marke „Entwurf“ (`.badge.grey`, das Grau für Ruhendes)
+  mit dem Tooltip „Noch nicht veröffentlicht – nicht für alle Angemeldeten freigegeben“. Freigegebene Seiten behalten
+  „für alle Angemeldeten“. Die Marke wird auch gedruckt.
+- **Seitenbaum:** Der Titel eines Entwurfs steht grau (`--grau`, auf der Leiste 4,7 : 1, auf Weiß 5,2 : 1), auch auf
+  der obersten Ebene und als offene Seite. „ – Entwurf“ steht im Tooltip, „(Entwurf)“ für Vorlesehilfen.
+- **Was zählt:** Lesebeschränkte Seiten sind Entwürfe, Vorlagen nicht. Die Regel `istEntwurf` steht in `wiki.js` und
+  rechnet aus dem Seitenbaum wie `api_wiki.is_public`. Es gibt keine neue Spalte und keinen Schemaschritt. Nach dem
+  Freigeben über „Teilen“ verschwindet die Marke sofort. Der Lesemodus zeigt nur freigegebene Seiten, also nie einen
+  Entwurf. Die Übung „Für alle Angemeldeten freigeben“ der Einführung zeigt vor dem Freigeben „Entwurf“ und danach
+  wie bisher „für alle Angemeldeten“.
+
+**Tests:** neu `test_wiki_entwurf.py` (Chromium, echte App: Einzelfreigabe, Abschnitt mit Unterseiten über zwei
+Ebenen, Unterseite einer Einzelfreigabe, lesebeschränkte Seite, Vorlage; Wiki-Verwaltung und Mitglied; Freigeben über
+„Teilen“); angepasst `test_wiki_seitenbaum.py` (Markup der Baumzeile).
