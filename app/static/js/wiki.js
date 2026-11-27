@@ -224,11 +224,17 @@
     return out;
   }
 
+  /* Der nächste Abschnitt über der Seite, der samt Unterseiten für alle Angemeldeten freigegeben ist – oder null. Eine
+     Seite darunter ohne eigene Freigabe ist über ihn veröffentlicht: Im Baum trägt sie den Globus abgeschwächt (grau,
+     blasser), Tooltip und Vorlesehilfe nennen den Abschnitt (Wunsch des Nutzers vom 27.11.2026, „ein Symbol, das sich
+     aber leicht unterscheidet“). Lesebeschränkte Seiten liegen nie darunter: Das verhindern Teilen und Beschränken. */
+  const freigabeAbschnitt = (p) => ancestors(p).reverse().find((a) => a.is_public && a.public_children) || null;
+
   /* Entwurf ist jede Seite, die nicht veröffentlicht ist: weder selbst noch über einen Abschnitt darüber für alle
      Angemeldeten freigegeben (dieselbe Regel wie api_wiki.is_public). Ausgenommen sind Vorlagen. Lesebeschränkte Seiten
      zählen mit (Wunsch des Nutzers vom 26.11.2026, Entscheidung „Vorlagen ausnehmen“). Am Seitentitel steht dafür die
      Marke „Entwurf“, im Baum ist der Titel grau. Der Lesemodus zeigt nur freigegebene Seiten, also nie einen Entwurf. */
-  const istEntwurf = (p) => !p.is_template && !p.is_public && !ancestors(p).some((a) => a.is_public && a.public_children);
+  const istEntwurf = (p) => !p.is_template && !p.is_public && !freigabeAbschnitt(p);
 
   /* Klappzeichen als gezeichneter Winkel im 16er-Raster wie die Kopfsymbole (ico weiter unten) – vorher das Schriftzeichen
      „▸/▾“ in 12 px, kaum zu sehen und zu treffen (Auftrag Seitenbaum, 28.10.2026). Er zeigt nach rechts und dreht sich
@@ -243,6 +249,7 @@
     return `<ul>${kids.map((p) => {
       const sub = branch(p.id, depth + 1);
       const entwurf = istEntwurf(p);
+      const ueber = p.is_public ? null : freigabeAbschnitt(p);
       const collapsed = sub && !path.has(p.id) && (state.collapsed.has(p.id) || (depth >= 1 && !state.collapsed.has(-p.id)));
       // Die Knöpfe der Zeile nennen ihre Seite (UI/UX vor dem Merge C12 – vorher sechsmal „Auf- oder zuklappen“ ohne Bezug);
       // der Klappknopf sagt zudem, ob die Unterseiten offen sind. Ohne Unterseiten ist er unsichtbar und nicht erreichbar.
@@ -251,7 +258,7 @@
       return `<li class="${sub ? "" : "leaf"}${collapsed ? " collapsed" : ""}" data-id="${p.id}" data-slug="${esc(p.slug)}">
         <div class="row"${p.can_delete ? ' draggable="true"' : ""}>
           <button class="tg" type="button" ${tg}>${sub ? KLAPPZEICHEN : ""}</button>
-          <a href="/stroemipedia/${esc(p.slug)}" title="${esc(p.title)}${entwurf ? " – Entwurf" : ""}" class="${state.current && state.current.id === p.id ? "active" : ""}">${p.icon ? `<span class="tree-icon" aria-hidden="true">${esc(p.icon)}</span>` : ""}<span class="baum-titel${entwurf ? " entwurf" : ""}">${esc(p.title)}${entwurf ? '<span class="nur-vorlesen"> (Entwurf)</span>' : ""}${p.is_public ? ' <span class="pub" title="für alle Angemeldeten freigegeben">🌐</span>' : ""}${p.favorite ? ' <span class="fav" title="auf der Merkliste">★</span>' : ""}</span></a>
+          <a href="/stroemipedia/${esc(p.slug)}" title="${esc(p.title)}${entwurf ? " – Entwurf" : ""}" class="${state.current && state.current.id === p.id ? "active" : ""}">${p.icon ? `<span class="tree-icon" aria-hidden="true">${esc(p.icon)}</span>` : ""}<span class="baum-titel${entwurf ? " entwurf" : ""}">${esc(p.title)}${entwurf ? '<span class="nur-vorlesen"> (Entwurf)</span>' : ""}${p.is_public ? ' <span class="pub" title="für alle Angemeldeten freigegeben">🌐</span>' : ""}${ueber ? ` <span class="pub geerbt" title="über „${esc(ueber.title)}“ für alle Angemeldeten freigegeben">🌐<span class="nur-vorlesen"> (über „${esc(ueber.title)}“ freigegeben)</span></span>` : ""}${p.favorite ? ' <span class="fav" title="auf der Merkliste">★</span>' : ""}</span></a>
           ${p.can_create ? `<button class="row-add" type="button" title="Unterseite anlegen" aria-label="Unterseite zu ${esc(p.title)} anlegen">+</button>` : ""}
           <button class="row-menu" type="button" title="Mehr" aria-haspopup="menu" aria-label="Weitere Aktionen zu ${esc(p.title)}">⋯</button>
         </div>${sub}</li>`;

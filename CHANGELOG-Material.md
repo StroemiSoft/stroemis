@@ -14624,3 +14624,23 @@ aufnehmen‘“. Am 22.11.2026 war die Nacharbeit bewusst ohne Reiter geblieben 
 lokalen HTTPS-Server: Nacharbeit → „Im Katalog anlegen“ → Recherche → „In die Felder übernehmen“ → „Anlegen“; Produkt
 mit Kategorie und Dateien, Zeile zugeordnet, Lauf „übernommen“; ohne Schlüssel keine Reiter); angepasst
 `test_material_recherche_reiter.py` (statische Bedingungen).
+
+## Strömipedia: abgeschwächter Globus für Seiten, die über ihren Abschnitt freigegeben sind (Wunsch, 27.11.2026)
+
+Nutzer: „Bei Artikeln, die über ihren Überartikel freigegeben sind, soll das auch durch ein Symbol indiziert werden, das
+sich aber leicht unterscheidet“. Bisher trug im Seitenbaum nur eine Seite mit eigener Freigabe den Globus 🌐. Die
+Seiten darunter, die über einen Abschnitt samt Unterseiten veröffentlicht sind, standen ohne Zeichen da. Seit dem
+26.11.2026 waren sie zwar nicht grau (kein Entwurf), aber von einer eigenen Freigabe nicht zu unterscheiden.
+
+- **Seitenbaum:** Eine Seite ohne eigene Freigabe unter einem Abschnitt, der samt Unterseiten freigegeben ist, trägt
+  denselben Globus grau und blasser (`.pub.geerbt`, `grayscale(1)`, Deckkraft 0,6). Tooltip „über „Abschnitt“ für alle
+  Angemeldeten freigegeben“, für Vorlesehilfen „(über „Abschnitt“ freigegeben)“. Die Farbe trägt den Unterschied
+  also nicht allein. Genannt wird der nächste freigegebene Abschnitt darüber. Eine Seite mit eigener Freigabe behält
+  den vollen Globus, auch innerhalb eines freigegebenen Abschnitts.
+- **Regel:** `freigabeAbschnitt` in `wiki.js` sucht den nächsten Vorfahren mit `is_public` und `public_children`.
+  `istEntwurf` nutzt ihn jetzt mit, die Regel bleibt dieselbe. Nach „Teilen“ mit „einschließlich aller Unterseiten“
+  zieht der Baum ohne Neuladen nach. Seitentitel, Server und Lesemodus sind unverändert.
+
+**Tests:** erweitert `test_wiki_entwurf.py` (innerer Abschnitt im freigegebenen Abschnitt: Globus je Zeile mit Art,
+Tooltip, Vorlesetext, Filter und Deckkraft; Freigabe samt Unterseiten über „Teilen“); angepasst
+`test_wiki_seitenbaum.py` (Markup der Baumzeile).
