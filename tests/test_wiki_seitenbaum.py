@@ -73,9 +73,13 @@ def test_klappknopf_markup():
     assert ('<span class="baum-titel${entwurf ? " entwurf" : ""}">${esc(p.title)}'
             '${entwurf ? \'<span class="nur-vorlesen"> (Entwurf)</span>\' : ""}'
             '${p.is_public ? \' <span class="pub" title="für alle Angemeldeten freigegeben">🌐</span>\' : ""}'
+            '${ueber ? ` <span class="pub geerbt" title="über „${esc(ueber.title)}“ für alle Angemeldeten freigegeben">🌐'
+            '<span class="nur-vorlesen"> (über „${esc(ueber.title)}“ freigegeben)</span></span>` : ""}'
             '${p.favorite ? \' <span class="fav" title="auf der Merkliste">★</span>\' : ""}</span></a>') in zweig
     assert 'title="${esc(p.title)}${entwurf ? " – Entwurf" : ""}"' in zweig
     assert "const entwurf = istEntwurf(p);" in zweig
+    # Über den Abschnitt freigegeben (Wunsch vom 27.11.2026): abgeschwächter Globus nur ohne eigene Freigabe.
+    assert "const ueber = p.is_public ? null : freigabeAbschnitt(p);" in zweig
     # Aufklappen schreibt Zustand und Namen nach.
     baum = js[js.index("function renderTree()"):js.index("function baumMenu(anchor)")]
     assert 'b.setAttribute("aria-expanded", String(!zu));' in baum
